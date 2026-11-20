@@ -96,6 +96,23 @@ bp uninstall                           # remove bp, leaving the bays as they are
 Run it from anywhere in the repository. `rm` asks before removing a worktree with uncommitted changes or
 unreferenced commits, unless `--force`; it keeps the bay config.
 
+## AI agents
+
+[`skills/bayplan/SKILL.md`](skills/bayplan/SKILL.md) teaches an AI agent to use `bp`: when to reach for a bay,
+how to write its config, where to edit its code, and what never to run without asking (`bp rm`, a database
+clone). It follows the Agent Skills format (a `SKILL.md` with a `name` and a `description`), which Claude
+Code and other agents read.
+
+For Claude Code, install it for every project:
+
+```sh
+mkdir -p ~/.claude/skills/bayplan
+curl -LsSf https://raw.githubusercontent.com/MaelBriantin/bayplan/main/skills/bayplan/SKILL.md \
+  -o ~/.claude/skills/bayplan/SKILL.md
+```
+
+or for one repository only, in its `.claude/skills/bayplan/`.
+
 ## Files
 
 ```
