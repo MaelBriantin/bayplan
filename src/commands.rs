@@ -131,13 +131,15 @@ impl Bay {
 #[derive(Default)]
 struct Created {
     worktree: bool,
+    /// Branch created for the worktree, with no commit of its own yet.
+    branch: Option<String>,
     /// The bay's Compose project, started for the first time.
     project: bool,
     /// Resources that provisioned something, with their state before it.
     resources: Vec<(usize, Value)>,
 }
 
-pub fn up(name: &str, from: Option<&str>, build: bool) -> Result<()> {
+pub fn up(name: &str, from: Option<&str>, branch: Option<&str>, build: bool) -> Result<()> {
     let bay = Bay::open(name)?;
     let _lock = Lock::acquire(&bay.layout.lock())?;
     let config = bay.config()?;
@@ -154,19 +156,21 @@ pub fn up(name: &str, from: Option<&str>, build: bool) -> Result<()> {
     let mut state = BayState::load(&bay.state_path())?;
     let mut created = Created::default();
 
-    let result = provision(
-        &bay,
-        &config,
-        &services,
-        &resources,
-        from,
-        &mut state,
-        &mut created,
-    )
-    .and_then(|hosts| {
-        bay.project().up(build)?;
-        Ok(hosts)
-    });
+    let result = create_worktree(&bay, &config, from, branch, &mut created)
+        .and_then(|()| {
+            provision(
+                &bay,
+                &config,
+                &services,
+                &resources,
+                &mut state,
+                &mut created,
+            )
+        })
+        .and_then(|hosts| {
+            bay.project().up(build)?;
+            Ok(hosts)
+        });
     let hosts = match result {
         Ok(hosts) => hosts,
         Err(error) => {
@@ -185,12 +189,53 @@ pub fn up(name: &str, from: Option<&str>, build: bool) -> Result<()> {
     Ok(())
 }
 
+/// Creates the worktree of the bay if missing, detached or on the branch it is given.
+fn create_worktree(
+    bay: &Bay,
+    config: &BayConfig,
+    from: Option<&str>,
+    branch: Option<&str>,
+    created: &mut Created,
+) -> Result<()> {
+    let root = bay.root();
+    let worktree = bay.worktree();
+    let branch = branch.or(config.branch.as_deref());
+    if !worktree.exists() {
+        let from = from.or(config.from.as_deref());
+        match branch {
+            None => git::add_worktree(root, &worktree, from.unwrap_or("HEAD"))?,
+            Some(branch) if git::branch_exists(root, branch) => {
+                if let Some(from) = from {
+                    bail!(
+                        "branch `{branch}` already exists: drop `from` ({from}) to check it out, or pick another branch"
+                    );
+                }
+                git::add_worktree_on_branch(root, &worktree, branch).with_context(|| {
+                    format!("cannot check out branch `{branch}` for bay `{}`", bay.name)
+                })?;
+            }
+            Some(branch) => {
+                git::add_worktree_new_branch(root, &worktree, branch, from.unwrap_or("HEAD"))?;
+                created.branch = Some(branch.to_owned());
+            }
+        }
+        created.worktree = true;
+    } else if let Some(branch) = branch
+        && git::current_branch(&worktree).as_deref() != Some(branch)
+    {
+        eprintln!(
+            "warning: the worktree of bay `{}` already exists and is not on branch `{branch}`; it is left as it is",
+            bay.name
+        );
+    }
+    Ok(())
+}
+
 fn provision(
     bay: &Bay,
     config: &BayConfig,
     services: &BTreeSet<String>,
     resources: &[Box<dyn Resource + '_>],
-    from: Option<&str>,
     state: &mut BayState,
     created: &mut Created,
 ) -> Result<Vec<String>> {
@@ -198,11 +243,6 @@ fn provision(
     let worktree = bay.worktree();
     let state_path = bay.state_path();
 
-    if !worktree.exists() {
-        let from = from.or(config.from.as_deref()).unwrap_or("HEAD");
-        git::add_worktree(root, &worktree, from)?;
-        created.worktree = true;
-    }
     deps::link_untracked(root, &worktree, &bay.descriptor.link)?;
     deps::copy_untracked(root, &worktree, &bay.descriptor.copy)?;
     deps::clone(root, &worktree, &bay.descriptor.deps, state)?;
@@ -412,6 +452,11 @@ fn rollback(
     {
         eprintln!("warning: cannot remove the worktree: {error:#}");
     }
+    if let Some(branch) = &created.branch
+        && let Err(error) = git::delete_branch(bay.root(), branch)
+    {
+        eprintln!("warning: cannot delete branch `{branch}`: {error:#}");
+    }
 }
 
 pub fn down(name: &str) -> Result<()> {
@@ -471,7 +516,9 @@ pub fn rm(name: &str, force: bool) -> Result<()> {
         );
     }
 
+    let mut branch = None;
     if worktree.exists() {
+        branch = git::current_branch(&worktree);
         git::remove_worktree(bay.root(), &worktree)?;
     }
     std::fs::remove_dir_all(bay.dir()).ok();
@@ -479,6 +526,9 @@ pub fn rm(name: &str, force: bool) -> Result<()> {
         "Bay `{name}` removed. Its config is kept: {}",
         bay.layout.bay_config(name).display()
     );
+    if let Some(branch) = branch {
+        println!("Its branch `{branch}` is kept");
+    }
     Ok(())
 }
 
@@ -489,7 +539,7 @@ pub fn ls() -> Result<()> {
         println!("No bay: create .bayplan/bays/<bay>.toml, then run `bp up <bay>`");
         return Ok(());
     }
-    println!("{:<20} {:<14} {:<10} HOSTS", "BAY", "STATUS", "HEAD");
+    println!("{:<20} {:<14} {:<30} HOSTS", "BAY", "STATUS", "HEAD");
     for bay in bays {
         let state = BayState::load(&layout.bay_dir(&bay).join("state.json"))?;
         let containers = runner::containers(&layout.bay_project(&bay)).unwrap_or_default();
@@ -503,7 +553,11 @@ pub fn ls() -> Result<()> {
         };
         let worktree = layout.worktree(&bay);
         let head = if worktree.exists() {
-            git::short_head(&worktree).unwrap_or_else(|_| "?".to_owned())
+            let short = git::short_head(&worktree).unwrap_or_else(|_| "?".to_owned());
+            match git::current_branch(&worktree) {
+                Some(branch) => format!("{branch}@{short}"),
+                None => short,
+            }
         } else {
             "-".to_owned()
         };
@@ -512,7 +566,7 @@ pub fn ls() -> Result<()> {
             .values()
             .map(|h| format!("https://{h}"))
             .collect();
-        println!("{bay:<20} {status:<14} {head:<10} {}", hosts.join(" "));
+        println!("{bay:<20} {status:<14} {head:<30} {}", hosts.join(" "));
     }
     Ok(())
 }
@@ -523,4 +577,159 @@ pub fn confirm(question: &str) -> Result<bool> {
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::tests::{create_branch, repo};
+
+    fn bay(root: &Path) -> Bay {
+        Bay {
+            name: "demo".to_owned(),
+            layout: Layout::new(root.to_path_buf()),
+            descriptor: toml::from_str(
+                r#"
+                [router]
+                kind = "traefik"
+                domain = "app.localhost"
+                [groups]
+                "#,
+            )
+            .unwrap(),
+        }
+    }
+
+    fn config(toml: &str) -> BayConfig {
+        toml::from_str(&format!("groups = []\n{toml}")).unwrap()
+    }
+
+    #[test]
+    fn creates_a_detached_worktree_without_a_branch() {
+        let root = repo("bay-detached");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        create_worktree(&bay, &config(""), None, None, &mut created).unwrap();
+        assert!(created.worktree);
+        assert_eq!(created.branch, None);
+        assert_eq!(git::current_branch(&bay.worktree()), None);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn creates_the_branch_when_missing() {
+        let root = repo("bay-new-branch");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        create_worktree(&bay, &config(""), None, Some("feat/x"), &mut created).unwrap();
+        assert_eq!(created.branch.as_deref(), Some("feat/x"));
+        assert_eq!(
+            git::current_branch(&bay.worktree()).as_deref(),
+            Some("feat/x")
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn takes_the_branch_from_the_bay_config() {
+        let root = repo("bay-config-branch");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        create_worktree(
+            &bay,
+            &config(r#"branch = "feat/x""#),
+            None,
+            None,
+            &mut created,
+        )
+        .unwrap();
+        assert_eq!(
+            git::current_branch(&bay.worktree()).as_deref(),
+            Some("feat/x")
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn checks_out_an_existing_branch_without_owning_it() {
+        let root = repo("bay-existing-branch");
+        create_branch(&root, "feat/x");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        create_worktree(&bay, &config(""), None, Some("feat/x"), &mut created).unwrap();
+        assert!(created.worktree);
+        assert_eq!(created.branch, None);
+        assert_eq!(
+            git::current_branch(&bay.worktree()).as_deref(),
+            Some("feat/x")
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn refuses_a_start_ref_for_an_existing_branch() {
+        let root = repo("bay-existing-branch-from");
+        create_branch(&root, "feat/x");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        let result = create_worktree(
+            &bay,
+            &config(""),
+            Some("main"),
+            Some("feat/x"),
+            &mut created,
+        );
+        assert!(result.is_err());
+        assert!(!created.worktree);
+        assert!(!bay.worktree().exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn leaves_an_existing_worktree_on_its_branch() {
+        let root = repo("bay-existing-worktree");
+        let bay = bay(&root);
+        create_worktree(
+            &bay,
+            &config(""),
+            None,
+            Some("feat/x"),
+            &mut Created::default(),
+        )
+        .unwrap();
+        let mut created = Created::default();
+        create_worktree(&bay, &config(""), None, Some("feat/y"), &mut created).unwrap();
+        assert!(!created.worktree);
+        assert_eq!(
+            git::current_branch(&bay.worktree()).as_deref(),
+            Some("feat/x")
+        );
+        assert!(!git::branch_exists(&root, "feat/y"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rollback_removes_the_worktree_and_the_branch_it_created() {
+        let root = repo("bay-rollback");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        create_worktree(&bay, &config(""), None, Some("feat/x"), &mut created).unwrap();
+        rollback(&bay, &[], &mut BayState::default(), &created);
+        assert!(!bay.worktree().exists());
+        assert!(!git::branch_exists(&root, "feat/x"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rollback_keeps_a_branch_it_did_not_create() {
+        let root = repo("bay-rollback-existing");
+        create_branch(&root, "feat/x");
+        let bay = bay(&root);
+        let mut created = Created::default();
+        create_worktree(&bay, &config(""), None, Some("feat/x"), &mut created).unwrap();
+        rollback(&bay, &[], &mut BayState::default(), &created);
+        assert!(!bay.worktree().exists());
+        assert!(git::branch_exists(&root, "feat/x"));
+        std::fs::remove_dir_all(root).ok();
+    }
 }

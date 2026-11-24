@@ -16,6 +16,9 @@ pub enum Command {
         /// Git ref the worktree starts from, when it does not exist yet
         #[arg(long)]
         from: Option<String>,
+        /// Branch the worktree checks out, created from the start ref if missing, when it does not exist yet
+        #[arg(long, short)]
+        branch: Option<String>,
         /// Rebuilds the images of the bay
         #[arg(long)]
         build: bool,

@@ -27,7 +27,11 @@ services; everything it does not duplicate is reached on the main stack.
    ```toml
    groups = ["dashboard"]    # groups of the descriptor
    from = "main"             # git ref the worktree starts from; defaults to HEAD
+   branch = "feat/demo"      # optional: branch to check out, created if missing
    ```
+
+   Set `branch` when the work done in the bay will be committed and pushed: without it, the worktree is
+   on a detached HEAD. An existing branch cannot be checked out while another worktree holds it.
 
    Add `[resources.mysql]` with `clone = true` only when the user asks for an own database: it copies
    the whole main database, which takes time and disk.
@@ -41,10 +45,10 @@ Pass `--build` after a Dockerfile change.
 
 | Command | Effect |
 |---|---|
-| `bp up <bay> [--from <ref>] [--build]` | creates what is missing, then starts the bay |
-| `bp ls` | lists bays with their state (`up n/m`, `down`), HEAD and URLs |
+| `bp up <bay> [--from <ref>] [--branch <name>] [--build]` | creates what is missing, then starts the bay |
+| `bp ls` | lists bays with their state (`up n/m`, `down`), branch and HEAD, and URLs |
 | `bp down <bay>` | stops the bay, keeping its worktree and resources |
-| `bp rm <bay> [--force]` | removes containers, resources and **the worktree** |
+| `bp rm <bay> [--force]` | removes containers, resources and **the worktree**, keeping its branch |
 
 Never run `bp rm`, and never pass `--force`, unless the user explicitly asks: it deletes the worktree,
 with any uncommitted work in it.

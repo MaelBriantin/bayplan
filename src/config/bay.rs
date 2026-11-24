@@ -10,6 +10,8 @@ pub struct BayConfig {
     pub groups: Vec<String>,
     /// Git ref the worktree starts from.
     pub from: Option<String>,
+    /// Branch the worktree checks out, instead of a detached HEAD.
+    pub branch: Option<String>,
     /// Resource name → options of the bay's share, read by that resource only.
     #[serde(default)]
     pub resources: BTreeMap<String, toml::Table>,
