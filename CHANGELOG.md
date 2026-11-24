@@ -9,6 +9,8 @@ Numbers: a minor version (0.2.0) for something new to use, a command, an option,
 ## Unreleased
 Written as the work goes, under the same New, Changed and Fixed; it becomes the next version's section when it is released.
 
+## v0.2.1 · November 24, 2026
+
 ### Fixed
 - `bp update` installed the new version in `~/.local` instead of `~/.local/bin`, next to the old one, which stayed first in the PATH. It now updates `bp` where it is, and repairs an install the earlier update moved: run the installer again once, then remove `~/.local/bp`.
 
