@@ -9,6 +9,8 @@ Numbers: a minor version (0.2.0) for something new to use, a command, an option,
 ## Unreleased
 Written as the work goes, under the same New, Changed and Fixed; it becomes the next version's section when it is released.
 
+## v0.3.0 · November 24, 2026
+
 ### New
 - `bp watch`, a screen following the main stack and the bays as they run: each one's state, branch, uncommitted changes and commits ahead of or behind its upstream; for the selected one, its containers with their healthcheck, its URLs, opened in the browser by their number (`1`–`9`), the pull request of its branch opened with `p` (with `gh`), what it has of each resource, its own share or the main stack's, and the logs of the selected container, read again every 2 seconds. `c` measures the CPU and memory of the main stack, of each bay and of all of them. `i` shows what the selected bay is made of: its groups and their services, `from`, `branch` and worktree. Started inside a bay's worktree, it selects that bay. `?` lists the keys.
 - From `bp watch`: `u`, `U`, `d` and `x` run `bp up`, `bp up --build`, `bp down` and `bp rm` on the selected bay, `rm` once confirmed, and `u` and `U` run `docker compose up -d` and `up -d --build` on the main stack; `r` restarts the selected container; the command's output shows in a window over the screen. `e` opens the selected worktree in `$EDITOR`: with the command of `$BAYPLAN_EDIT`, in a new tab of any terminal, or in a new Rex or tmux window; `y` copies its path. When Docker is not reachable, the screen says so.
