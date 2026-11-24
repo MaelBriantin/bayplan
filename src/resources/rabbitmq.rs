@@ -90,3 +90,103 @@ impl Resource for Rabbitmq<'_> {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::exec::tests::FakeDocker;
+
+    fn config() -> RabbitmqConfig {
+        RabbitmqConfig {
+            service: "rabbitmq".to_owned(),
+            user: "app".to_owned(),
+            dsn_vars: vec!["MESSENGER_DSN".to_owned()],
+        }
+    }
+
+    fn dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("bayplan-rabbitmq-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        dir
+    }
+
+    #[test]
+    fn points_the_dsn_at_the_vhost_keeping_its_query() {
+        let config = config();
+        let rabbitmq = Rabbitmq { config: &config };
+        let env = Env::from([
+            (
+                "MESSENGER_DSN".to_owned(),
+                "amqp://app:app@rabbitmq:5672/%2f?heartbeat=30".to_owned(),
+            ),
+            (
+                "OTHER_DSN".to_owned(),
+                "amqp://rabbitmq:5672/%2f".to_owned(),
+            ),
+        ]);
+        assert_eq!(
+            rabbitmq.env(&json!({"vhost": "bay-demo"}), &env),
+            Env::from([(
+                "MESSENGER_DSN".to_owned(),
+                "amqp://app:app@rabbitmq:5672/bay-demo?heartbeat=30".to_owned()
+            )])
+        );
+        assert!(rabbitmq.env(&Value::Null, &env).is_empty());
+    }
+
+    #[test]
+    fn deletes_the_vhost_when_its_permissions_fail() {
+        let dir = dir("provision-failed");
+        let docker = FakeDocker::install(&dir);
+        docker.fail_on("set_permissions");
+        let config = config();
+        let envs = [Env::from([(
+            "MESSENGER_DSN".to_owned(),
+            "amqp://rabbitmq:5672/%2f".to_owned(),
+        )])];
+        let context = Context {
+            root: &dir,
+            bay: "demo",
+            options: &toml::Table::new(),
+            envs: &envs,
+            main_envs: &[],
+            others: &[],
+        };
+        let mut state = Value::Null;
+        assert!(
+            Rabbitmq { config: &config }
+                .provision(&context, &mut state)
+                .is_err()
+        );
+        assert_eq!(state, Value::Null);
+        assert!(docker.calls()[2].ends_with("rabbitmqctl delete_vhost bay-demo"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn deletes_the_vhost_on_teardown_and_keeps_it_when_that_fails() {
+        let dir = dir("teardown");
+        let docker = FakeDocker::install(&dir);
+        let config = config();
+        let rabbitmq = Rabbitmq { config: &config };
+
+        docker.fail_on("delete_vhost");
+        let mut state = json!({"vhost": "bay-demo"});
+        assert!(rabbitmq.teardown(&dir, &mut state).is_err());
+        assert_eq!(state, json!({"vhost": "bay-demo"}));
+
+        std::fs::remove_file(dir.join("fail")).unwrap();
+        rabbitmq.teardown(&dir, &mut state).unwrap();
+        assert_eq!(state, Value::Null);
+        assert_eq!(
+            docker.calls()[1],
+            "compose exec -T rabbitmq rabbitmqctl delete_vhost bay-demo"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+}
