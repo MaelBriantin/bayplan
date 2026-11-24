@@ -14,24 +14,12 @@ const APP: &str = "bayplan";
 /// A GitHub token to ask for releases with, if set, against the rate limit of anonymous requests.
 const TOKEN_VARIABLE: &str = "BAYPLAN_GITHUB_TOKEN";
 
-/// Where the update goes, against where the binary is.
-#[derive(Debug, PartialEq, Eq)]
-enum Target {
-    /// Where it is, as the updater finds it.
-    Same,
-    /// Its root, told in so many words: the installer put the binary straight in a `bin` folder,
-    /// in which the updater would otherwise create another `bin` folder.
-    Root(PathBuf),
-}
-
-fn target(prefix: &Path, flat: bool) -> Target {
-    if flat && prefix.ends_with("bin") {
-        prefix
-            .parent()
-            .map_or(Target::Same, |root| Target::Root(root.to_path_buf()))
-    } else {
-        Target::Same
-    }
+/// Folder a flat install is updated in: the one of the running binary. The installer puts a flat install
+/// exactly in the folder it is given, and the receipt may point elsewhere: `bp update` up to 0.2.0 wrote
+/// the folder above `bin` in it. `None` keeps the folder of the receipt.
+fn target(binary: &Path, flat: bool) -> Option<PathBuf> {
+    flat.then(|| binary.parent().map(Path::to_path_buf))
+        .flatten()
 }
 
 fn receipt_path() -> Option<PathBuf> {
@@ -54,12 +42,12 @@ pub fn update() -> Result<()> {
         );
         return Ok(());
     }
-    let prefix = PathBuf::from(updater.install_prefix_root()?.as_str());
     let flat = receipt_path()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .is_some_and(|receipt| receipt.contains(r#""install_layout":"flat""#));
-    if let Target::Root(root) = target(&prefix, flat) {
-        updater.set_install_dir(root.to_string_lossy().as_ref());
+    let binary = std::env::current_exe()?.canonicalize()?;
+    if let Some(folder) = target(&binary, flat) {
+        updater.set_install_dir(folder.to_string_lossy().as_ref());
     }
     match updater.run_sync()? {
         Some(update) => println!("bp is now version {}.", update.new_version),
@@ -103,13 +91,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_flat_layout_is_given_its_root_the_others_stay_where_they_are() {
-        let home = Path::new("/home/dev");
-        assert_eq!(
-            target(&home.join(".local/bin"), true),
-            Target::Root(home.join(".local"))
-        );
-        assert_eq!(target(&home.join(".cargo"), false), Target::Same);
-        assert_eq!(target(&home.join(".local"), false), Target::Same);
+    fn a_flat_install_is_updated_in_the_folder_of_the_binary() {
+        let bin = Path::new("/home/dev/.local/bin");
+        assert_eq!(target(&bin.join("bp"), true), Some(bin.to_path_buf()));
+    }
+
+    #[test]
+    fn another_layout_keeps_the_folder_of_the_receipt() {
+        assert_eq!(target(Path::new("/home/dev/.cargo/bin/bp"), false), None);
     }
 }
