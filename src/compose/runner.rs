@@ -26,13 +26,16 @@ pub fn config(dir: &Path, project: &str) -> Result<Value> {
     serde_json::from_str(&output).context("unreadable `docker compose config` output")
 }
 
+/// Resolved configuration of the main stack, as Compose loads it in `root`.
+pub fn main_config(root: &Path) -> Result<Value> {
+    let output = exec::output(root, "docker", ["compose", "config", "--format", "json"])?;
+    serde_json::from_str(&output).context("unreadable `docker compose config` output")
+}
+
 /// Compose project name of the main stack, as Compose resolves it: from `name:`, `COMPOSE_PROJECT_NAME` or
 /// the directory.
 pub fn main_project_name(root: &Path) -> Result<String> {
-    let output = exec::output(root, "docker", ["compose", "config", "--format", "json"])?;
-    let config: Value =
-        serde_json::from_str(&output).context("unreadable `docker compose config` output")?;
-    config
+    main_config(root)?
         .get("name")
         .and_then(Value::as_str)
         .map(str::to_owned)

@@ -20,16 +20,16 @@ What each version brought is in [CHANGELOG.md](CHANGELOG.md).
 
 bayplan aims to infer what it can from the Compose configuration, so that it works without blocking in most
 cases, while a precise description of the project remains the reliable way to handle the unusual ones.
-These principles guide its design; the first and the last apply today, the others are where it is heading.
+These principles guide its design; the first and the last apply fully today, the others in part, through
+`bp init`, and fully where it is heading.
 
 1. **Explicit wins.** What the descriptor states always takes precedence over what bayplan infers.
-2. **Infer rather than block.** *Planned*: without a description, bayplan would infer from the resolved
-   Compose configuration (names, aliases, labels, images, lockfiles) whatever it needs to get a bay
-   running. Today the descriptor is required.
-3. **Every inference is visible.** *Planned*: each decision shows where it comes from, inferred or
-   declared; nothing happens silently.
-4. **Nudge towards explicit.** *Planned*: inferences come with the descriptor lines that would make them
-   explicit, to review and keep.
+2. **Infer rather than block.** `bp init` infers the descriptor from the resolved Compose configuration and
+   git (labels, images, mounts, untracked files, lockfiles). *Planned*: `bp up` would infer what the
+   descriptor leaves out; today it requires one.
+3. **Every inference is visible.** Each line `bp init` writes says where it comes from. *Planned*: the same
+   for what `bp up` would infer.
+4. **Nudge towards explicit.** `bp init` writes the inferences as descriptor lines, to review and keep.
 5. **Warn on ambiguity, never gamble.** What bayplan cannot carry over to a bay raises a warning, and
    nothing is removed on a guess: data it did not create is left alone.
 
@@ -91,6 +91,7 @@ From source, with a Rust toolchain: `cargo install --path .`
 bp up <bay> [--from <ref>] [--branch <name>] [--build]   # create what is missing, then start
 bp down <bay>                          # stop, keeping the worktree and resources
 bp rm <bay> [--force]                  # remove containers, resources, registrations and worktree
+bp init [--write]                      # infer bayplan.toml, print it, or write it if missing
 bp ls                                  # list the bays, their state, branch and HEAD, and hosts
 bp watch                               # follow the bays: containers, URLs to open, logs
 bp update                              # install the latest release
@@ -180,7 +181,27 @@ clone = true                      # own copy of the database (default: shared wi
 
 ### Descriptor — `bayplan.toml`
 
-Written once per repository. Every key but `router` and `groups` is optional.
+Written once per repository, best started with `bp init --write`, then reviewed. Every key but `router` and
+`groups` is optional.
+
+`bp init` reads the main stack's Compose configuration and git, and infers:
+
+- `router`: Traefik, from the `traefik.*` labels, and the domain all their hosts end with;
+- `link`: untracked files Compose reads on the host: the overrides it loads by itself, `.env`, the files of
+  `secrets`, files the compose files in use name;
+- `copy`: untracked env and secret files (`.env*`, `*.pem`, `.ssh`…) under directories mounted into
+  containers;
+- `rewrite_files`: files mounted alone whose content reaches a service by its name, as `api:9000`;
+- `groups`: one per service of the repository's code the router exposes, with such services it depends on,
+  then one per other one; a proposal to rearrange;
+- `deps`: untracked dependency directories beside a lockfile (`node_modules`, `vendor`), installed in the
+  services built from the lockfile's directory;
+- `resources`: MySQL/MariaDB, RabbitMQ and Redis from their images, with their credentials and the
+  variables of the services naming them.
+
+Each line says where it comes from. What `bp init` sees but cannot handle, as a PostgreSQL the bays would
+share, ends the file as a note; `registrations` are never inferred. With a descriptor already there, `bp init`
+prints what it would infer, to compare.
 
 ```toml
 # Untracked files Compose reads on the host: symlinked, so main tree changes apply to every bay

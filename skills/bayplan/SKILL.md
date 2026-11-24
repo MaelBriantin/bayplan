@@ -1,6 +1,6 @@
 ---
 name: bayplan
-description: Runs an isolated copy of part of a Docker Compose stack for a git worktree with the `bp` CLI (bayplan), next to the main stack. Use when the repository has a `bayplan.toml` at its root and the user wants to run, test or preview a branch or worktree in parallel of the main stack, or mentions a bay, `bp up`, `bp ls` or `.bayplan/`.
+description: Runs an isolated copy of part of a Docker Compose stack for a git worktree with the `bp` CLI (bayplan), next to the main stack. Use when the repository has a `bayplan.toml` at its root and the user wants to run, test or preview a branch or worktree in parallel of the main stack, or mentions a bay, `bp up`, `bp ls`, `bp init` or `.bayplan/`.
 ---
 
 # bayplan
@@ -13,6 +13,8 @@ services; everything it does not duplicate is reached on the main stack.
 
 - `bayplan.toml` at the repository root: the descriptor. It lists the **groups** of services a bay can
   pick from, and how to duplicate the stack. Read it, do not change it without the user's agreement.
+  Without one, `bp init` prints what bayplan infers: show it to the user, who decides whether to write it
+  (`bp init --write`) and what to fix.
 - `.bayplan/bays/<bay>.toml`: what a bay runs. Writing one is how a bay is created.
 - `.bayplan/worktrees/<bay>/`: the bay's worktree. Code for a bay is edited **there**, never in the main
   tree.

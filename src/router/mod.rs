@@ -18,6 +18,11 @@ pub trait Router {
     fn rewrite(&self, service: &mut Value, bay: &str, rewriter: &Rewriter) -> Vec<String>;
 }
 
+/// Hosts a service answers on, read from its Traefik labels, with no descriptor to tell the domain.
+pub fn traefik_hosts(service: &Value) -> Vec<String> {
+    traefik::Traefik::new("").hosts(service)
+}
+
 pub fn from_descriptor(descriptor: &Descriptor) -> Box<dyn Router> {
     match descriptor.router.kind {
         RouterKind::Traefik => Box::new(traefik::Traefik::new(&descriptor.router.domain)),

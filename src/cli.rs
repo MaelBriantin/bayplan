@@ -34,6 +34,12 @@ pub enum Command {
     },
     /// Lists the bays and their state
     Ls,
+    /// Infers the descriptor, bayplan.toml, from the Compose configuration and git, each line saying why
+    Init {
+        /// Writes bayplan.toml, unless it exists
+        #[arg(long)]
+        write: bool,
+    },
     /// Shows the bays, their containers, URLs and logs, refreshed as they run
     Watch,
     /// Updates bp to the latest release

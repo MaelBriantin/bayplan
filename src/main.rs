@@ -5,6 +5,7 @@ mod config;
 mod deps;
 mod exec;
 mod git;
+mod infer;
 mod install;
 mod lock;
 mod registration;
@@ -30,6 +31,7 @@ fn main() {
         Command::Rm { bay, force } => commands::rm(&bay, force),
         Command::Ls => commands::ls(),
         Command::Watch => watch::run(),
+        Command::Init { write } => infer::init(write),
         Command::Update => install::update(),
         Command::Uninstall => install::uninstall(),
     };
