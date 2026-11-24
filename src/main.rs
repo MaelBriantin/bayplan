@@ -19,7 +19,12 @@ use crate::cli::{Cli, Command};
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Up { bay, from, build } => commands::up(&bay, from.as_deref(), build),
+        Command::Up {
+            bay,
+            from,
+            branch,
+            build,
+        } => commands::up(&bay, from.as_deref(), branch.as_deref(), build),
         Command::Down { bay } => commands::down(&bay),
         Command::Rm { bay, force } => commands::rm(&bay, force),
         Command::Ls => commands::ls(),

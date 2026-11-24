@@ -35,7 +35,8 @@ These principles guide its design; the first and the last apply today, the other
 
 `bp up <bay>`:
 
-1. creates the worktree `.bayplan/worktrees/<bay>` (detached, from `from`, `--from` or `HEAD`) if missing;
+1. creates the worktree `.bayplan/worktrees/<bay>` if missing, from `from`, `--from` or `HEAD`: detached, or
+   on the branch given by `branch` or `--branch`, created if it does not exist;
 2. links and copies the untracked files the stack needs (env files, secrets, keys) from the main tree;
 3. clones the dependency directories (`node_modules`, `vendor`) from the main tree, copy-on-write when the
    filesystem allows it;
@@ -85,16 +86,16 @@ From source, with a Rust toolchain: `cargo install --path .`
 ## Usage
 
 ```sh
-bp up <bay> [--from <ref>] [--build]   # create what is missing, then start
+bp up <bay> [--from <ref>] [--branch <name>] [--build]   # create what is missing, then start
 bp down <bay>                          # stop, keeping the worktree and resources
 bp rm <bay> [--force]                  # remove containers, resources, registrations and worktree
-bp ls                                  # list the bays, their state, HEAD and hosts
+bp ls                                  # list the bays, their state, branch and HEAD, and hosts
 bp update                              # install the latest release
 bp uninstall                           # remove bp, leaving the bays as they are
 ```
 
 Run it from anywhere in the repository. `rm` asks before removing a worktree with uncommitted changes or
-unreferenced commits, unless `--force`; it keeps the bay config.
+unreferenced commits, unless `--force`; it keeps the bay config and the worktree's branch.
 
 ## AI agents
 
@@ -132,6 +133,8 @@ setup. `.bayplan/` is local to each machine: keep it out of git (`.gitignore`, o
 ```toml
 groups = ["back", "dashboard"]   # groups of the descriptor to duplicate
 from = "main"                     # git ref the worktree starts from (default: HEAD)
+branch = "feat/demo"              # branch the worktree checks out, created from `from` if missing
+                                  # (default: detached HEAD)
 
 # Options of the bay's share of a resource, read by that resource only
 [resources.mysql]

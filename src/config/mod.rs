@@ -22,9 +22,12 @@ pub struct Layout {
 
 impl Layout {
     pub fn discover() -> Result<Self> {
-        let root = git::main_root(&std::env::current_dir()?)?;
+        Ok(Self::new(git::main_root(&std::env::current_dir()?)?))
+    }
+
+    pub fn new(root: PathBuf) -> Self {
         let dir = root.join(".bayplan");
-        Ok(Self { root, dir })
+        Self { root, dir }
     }
 
     pub fn descriptor(&self) -> PathBuf {
@@ -123,5 +126,17 @@ mod tests {
         for name in ["", "-demo", "demo-", "Demo", "demo_1", &"a".repeat(33)] {
             assert!(validate_bay_name(name).is_err(), "{name}");
         }
+    }
+
+    #[test]
+    fn reads_the_branch_of_a_bay() {
+        let config: BayConfig = toml::from_str(
+            r#"
+            groups = ["app"]
+            branch = "feat/demo"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.branch.as_deref(), Some("feat/demo"));
     }
 }
