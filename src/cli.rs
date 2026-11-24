@@ -34,6 +34,8 @@ pub enum Command {
     },
     /// Lists the bays and their state
     Ls,
+    /// Shows the bays, their containers, URLs and logs, refreshed as they run
+    Watch,
     /// Updates bp to the latest release
     Update,
     /// Removes bp from this computer, leaving the bays as they are

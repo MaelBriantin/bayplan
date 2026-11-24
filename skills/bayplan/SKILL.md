@@ -53,6 +53,8 @@ Pass `--build` after a Dockerfile change.
 Never run `bp rm`, and never pass `--force`, unless the user explicitly asks: it deletes the worktree,
 with any uncommitted work in it.
 
+`bp watch` is an interactive screen for the user: do not run it, use `bp ls` to read the bays' state.
+
 ## Hosts
 
 A service exposed as `<name>.<domain>` on the main stack is exposed as `<name>-<bay>.<domain>` in the

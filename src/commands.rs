@@ -474,6 +474,18 @@ pub fn rm(name: &str, force: bool) -> Result<()> {
     remove(&bay, &resources, force, &confirm)
 }
 
+/// What removing a worktree would lose.
+pub fn removal_risks(worktree: &Path) -> Result<Vec<&'static str>> {
+    let mut risks = Vec::new();
+    if git::is_dirty(worktree)? {
+        risks.push("uncommitted changes");
+    }
+    if git::is_unreferenced(worktree)? {
+        risks.push("commits on no branch, tag or remote branch, which would be lost");
+    }
+    Ok(risks)
+}
+
 fn remove(
     bay: &Bay,
     resources: &[Box<dyn Resource + '_>],
@@ -484,13 +496,7 @@ fn remove(
     let _lock = Lock::acquire(&bay.layout.lock())?;
     let worktree = bay.worktree();
     if worktree.exists() && !force {
-        let mut risks = Vec::new();
-        if git::is_dirty(&worktree)? {
-            risks.push("uncommitted changes");
-        }
-        if git::is_unreferenced(&worktree)? {
-            risks.push("commits on no branch, tag or remote branch, which would be lost");
-        }
+        let risks = removal_risks(&worktree)?;
         if !risks.is_empty()
             && !confirm(&format!(
                 "The worktree {} has {}. Remove it anyway?",
@@ -543,41 +549,183 @@ fn remove(
     Ok(())
 }
 
+/// What a bay runs, as `bp ls` and `bp watch` show it.
+pub struct BayStatus {
+    pub name: String,
+    /// Compose project of the bay.
+    pub project: String,
+    /// Compose file of the bay, which commands on its services need.
+    pub compose_file: PathBuf,
+    pub worktree: PathBuf,
+    /// `branch@sha`, or the short sha alone on a detached HEAD; `None` without a worktree.
+    pub head: Option<String>,
+    /// Whether the worktree has uncommitted changes.
+    pub dirty: bool,
+    /// Commits ahead of and behind the upstream branch, when the branch has one.
+    pub sync: Option<(usize, usize)>,
+    pub urls: Vec<String>,
+    pub containers: Vec<Container>,
+    /// Each resource the descriptor declares, with what the bay has of it.
+    pub resources: Vec<(String, String)>,
+    /// Groups the bay duplicates, with their services.
+    pub groups: Vec<(String, Vec<String>)>,
+    /// Ref and branch the bay config asks the worktree to start from and check out.
+    pub from: Option<String>,
+    pub branch: Option<String>,
+    /// Why the bay config cannot be read, when it cannot.
+    pub config_error: Option<String>,
+}
+
+pub struct Container {
+    /// Name of the container, as `docker stats` gives it.
+    pub name: String,
+    pub service: String,
+    pub state: String,
+    /// Healthcheck status, empty for a service without one.
+    pub health: String,
+    /// Exit code of a container that stopped.
+    pub exit_code: i64,
+}
+
+/// `down`, or `up <running>/<containers>`.
+pub fn summary(containers: &[Container]) -> String {
+    let running = containers
+        .iter()
+        .filter(|container| container.state == "running")
+        .count();
+    match containers.len() {
+        0 => "down".to_owned(),
+        total => format!("up {running}/{total}"),
+    }
+}
+
+impl BayStatus {
+    pub fn summary(&self) -> String {
+        summary(&self.containers)
+    }
+}
+
+/// Containers of a Compose project, none when Docker cannot tell.
+pub fn containers(project: &str) -> Vec<Container> {
+    runner::containers(project)
+        .unwrap_or_default()
+        .iter()
+        .map(|container| {
+            let field = |name: &str| {
+                container
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            Container {
+                name: field("Name"),
+                service: field("Service"),
+                state: field("State"),
+                health: field("Health"),
+                exit_code: container
+                    .get("ExitCode")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// `branch@sha` of a working tree, or the short sha alone on a detached HEAD.
+pub fn head(tree: &Path) -> String {
+    let short = git::short_head(tree).unwrap_or_else(|_| "?".to_owned());
+    match git::current_branch(tree) {
+        Some(branch) => format!("{branch}@{short}"),
+        None => short,
+    }
+}
+
+pub fn statuses(layout: &Layout) -> Result<Vec<BayStatus>> {
+    let descriptor: Option<Descriptor> = read_toml(&layout.descriptor()).ok();
+    let declared = descriptor
+        .as_ref()
+        .map_or_default(|descriptor| resources::from_config(&descriptor.resources));
+    layout
+        .bays()?
+        .into_iter()
+        .map(|bay| {
+            let state = BayState::load(&layout.bay_dir(&bay).join("state.json"))?;
+            let config_path = layout.bay_config(&bay);
+            let (config, config_error) = if config_path.exists() {
+                match read_toml::<BayConfig>(&config_path) {
+                    Ok(config) => (Some(config), None),
+                    Err(error) => (None, Some(format!("{error:#}"))),
+                }
+            } else {
+                (None, None)
+            };
+            let project = layout.bay_project(&bay);
+            let containers = containers(&project);
+            let worktree = layout.worktree(&bay);
+            let exists = worktree.exists();
+            let head = exists.then(|| head(&worktree));
+            let urls = state
+                .hosts
+                .values()
+                .map(|host| format!("https://{host}"))
+                .collect();
+            let resources = declared
+                .iter()
+                .map(|resource| {
+                    let name = resource.name();
+                    (name.to_owned(), resource.describe(state.resource(name)))
+                })
+                .collect();
+            let groups = config.as_ref().map_or_default(|config| {
+                config
+                    .groups
+                    .iter()
+                    .map(|group| {
+                        let services = descriptor
+                            .as_ref()
+                            .and_then(|descriptor| descriptor.groups.get(group))
+                            .cloned()
+                            .unwrap_or_default();
+                        (group.clone(), services)
+                    })
+                    .collect()
+            });
+            Ok(BayStatus {
+                compose_file: layout.bay_dir(&bay).join("compose.json"),
+                name: bay,
+                project,
+                dirty: exists && git::is_dirty(&worktree).unwrap_or(false),
+                sync: exists.then(|| git::ahead_behind(&worktree)).flatten(),
+                worktree,
+                head,
+                urls,
+                containers,
+                resources,
+                groups,
+                from: config.as_ref().and_then(|config| config.from.clone()),
+                branch: config.and_then(|config| config.branch),
+                config_error,
+            })
+        })
+        .collect()
+}
+
 pub fn ls() -> Result<()> {
-    let layout = Layout::discover()?;
-    let bays = layout.bays()?;
-    if bays.is_empty() {
+    let statuses = statuses(&Layout::discover()?)?;
+    if statuses.is_empty() {
         println!("No bay: create .bayplan/bays/<bay>.toml, then run `bp up <bay>`");
         return Ok(());
     }
     println!("{:<20} {:<14} {:<30} HOSTS", "BAY", "STATUS", "HEAD");
-    for bay in bays {
-        let state = BayState::load(&layout.bay_dir(&bay).join("state.json"))?;
-        let containers = runner::containers(&layout.bay_project(&bay)).unwrap_or_default();
-        let running = containers
-            .iter()
-            .filter(|c| c.get("State").and_then(|s| s.as_str()) == Some("running"))
-            .count();
-        let status = match containers.len() {
-            0 => "down".to_owned(),
-            total => format!("up {running}/{total}"),
-        };
-        let worktree = layout.worktree(&bay);
-        let head = if worktree.exists() {
-            let short = git::short_head(&worktree).unwrap_or_else(|_| "?".to_owned());
-            match git::current_branch(&worktree) {
-                Some(branch) => format!("{branch}@{short}"),
-                None => short,
-            }
-        } else {
-            "-".to_owned()
-        };
-        let hosts: Vec<_> = state
-            .hosts
-            .values()
-            .map(|h| format!("https://{h}"))
-            .collect();
-        println!("{bay:<20} {status:<14} {head:<30} {}", hosts.join(" "));
+    for status in statuses {
+        println!(
+            "{:<20} {:<14} {:<30} {}",
+            status.name,
+            status.summary(),
+            status.head.as_deref().unwrap_or("-"),
+            status.urls.join(" ")
+        );
     }
     Ok(())
 }
@@ -779,6 +927,10 @@ mod tests {
         fn env(&self, _: &Value, _: &Env) -> Env {
             Env::new()
         }
+
+        fn describe(&self, _: &Value) -> String {
+            String::new()
+        }
     }
 
     fn recorders(failing: &[&str], log: &Rc<RefCell<Vec<&'static str>>>) -> Vec<Box<dyn Resource>> {
@@ -975,6 +1127,45 @@ mod tests {
         assert!(bay.worktree().exists());
         let saved = BayState::load(&bay.state_path()).unwrap();
         assert_eq!(saved.resources.keys().collect::<Vec<_>>(), ["rabbitmq"]);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn reads_the_status_of_each_bay() {
+        let root = repo("statuses");
+        let docker = FakeDocker::install(&root.join("docker"));
+        docker.output(concat!(
+            r#"{"Service":"web","State":"running","Health":"healthy"}"#,
+            "\n",
+            r#"{"Service":"api","State":"exited","Health":""}"#,
+            "\n",
+        ));
+        let bay = bay(&root);
+        create_worktree(
+            &bay,
+            &config(""),
+            None,
+            Some("feat/x"),
+            &mut Created::default(),
+        )
+        .unwrap();
+        let mut state = BayState::default();
+        state.hosts.insert(
+            "app.localhost".to_owned(),
+            "bay-demo.app.localhost".to_owned(),
+        );
+        state.save(&bay.state_path()).unwrap();
+
+        let statuses = statuses(&bay.layout).unwrap();
+        assert_eq!(statuses.len(), 1);
+        let status = &statuses[0];
+        assert_eq!(status.name, "demo");
+        assert_eq!(status.summary(), "up 1/2");
+        assert!(status.head.as_deref().unwrap().starts_with("feat/x@"));
+        assert_eq!(status.urls, ["https://bay-demo.app.localhost"]);
+        assert_eq!(status.containers[0].service, "web");
+        assert_eq!(status.containers[0].health, "healthy");
+        assert!(docker.calls()[0].ends_with(&format!("-p {} ps -a --format json", status.project)));
         std::fs::remove_dir_all(root).ok();
     }
 }

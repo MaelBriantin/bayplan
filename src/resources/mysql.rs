@@ -124,6 +124,20 @@ impl Resource for Mysql<'_> {
         Ok(())
     }
 
+    fn describe(&self, state: &Value) -> String {
+        let typed: State = load(state);
+        match (typed.database, typed.paused) {
+            (Some(database), false) => format!("own copy of the database: {database}"),
+            (Some(database), true) => {
+                format!("uses the main database again; its copy {database} is kept")
+            }
+            (None, _) => format!(
+                "no copy: writes go to the main stack's database {}",
+                self.config.database
+            ),
+        }
+    }
+
     fn env(&self, state: &Value, env: &Env) -> Env {
         let typed: State = load(state);
         let Some(database) = typed.database.filter(|_| !typed.paused) else {

@@ -129,6 +129,18 @@ pub fn remove_worktree(root: &Path, path: &Path) -> Result<()> {
     exec::run(root, "git", ["worktree", "prune"])
 }
 
+/// Commits ahead of and behind the upstream branch, `None` without one.
+pub fn ahead_behind(path: &Path) -> Option<(usize, usize)> {
+    let counts = exec::output(
+        path,
+        "git",
+        ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+    )
+    .ok()?;
+    let (ahead, behind) = counts.trim().split_once('\t')?;
+    Some((ahead.parse().ok()?, behind.parse().ok()?))
+}
+
 pub fn short_head(path: &Path) -> Result<String> {
     Ok(exec::output(path, "git", ["rev-parse", "--short", "HEAD"])?
         .trim()

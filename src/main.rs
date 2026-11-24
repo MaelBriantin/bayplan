@@ -11,6 +11,7 @@ mod registration;
 mod resources;
 mod router;
 mod state;
+mod watch;
 
 use clap::Parser;
 
@@ -28,6 +29,7 @@ fn main() {
         Command::Down { bay } => commands::down(&bay),
         Command::Rm { bay, force } => commands::rm(&bay, force),
         Command::Ls => commands::ls(),
+        Command::Watch => watch::run(),
         Command::Update => install::update(),
         Command::Uninstall => install::uninstall(),
     };
