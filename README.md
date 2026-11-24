@@ -193,7 +193,8 @@ Written once per repository, best started with `bp init --write`, then reviewed.
   containers;
 - `rewrite_files`: files mounted alone whose content reaches a service by its name, as `api:9000`;
 - `groups`: one per service of the repository's code the router exposes, with such services it depends on,
-  then one per other one; a proposal to rearrange;
+  then one per image several other ones run (as consumers), then one per other one, leaving out the
+  one-off tasks that ran and ended on the main stack; a proposal to rearrange;
 - `deps`: untracked dependency directories beside a lockfile (`node_modules`, `vendor`), installed in the
   services built from the lockfile's directory;
 - `resources`: MySQL/MariaDB, RabbitMQ and Redis from their images, with their credentials and the

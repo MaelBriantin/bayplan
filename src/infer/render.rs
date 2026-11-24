@@ -71,7 +71,9 @@ pub fn render(inference: &Inference) -> String {
         .iter()
         .map(|group| format!("{} = {}", quoted(&group.value.0), list(&group.value.1)).len())
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        // A long group pushes only its own comment along.
+        .min(60);
     for group in &inference.groups {
         let line = format!("{} = {}", quoted(&group.value.0), list(&group.value.1));
         let _ = writeln!(out, "{line:<width$}  # {}", group.why);

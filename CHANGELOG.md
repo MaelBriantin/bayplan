@@ -10,7 +10,7 @@ Numbers: a minor version (0.2.0) for something new to use, a command, an option,
 Written as the work goes, under the same New, Changed and Fixed; it becomes the next version's section when it is released.
 
 ### New
-- `bp init` infers the descriptor, `bayplan.toml`, from the main stack's Compose configuration and git: the router and its domain, the untracked files to link and to copy, the files to rewrite, groups of services, dependency directories with their install command, and MySQL/MariaDB, RabbitMQ and Redis with their variables. Each line says where it comes from; what it cannot handle, as a database without a resource, is said in a note. It prints the descriptor, or writes it with `--write` when there is none.
+- `bp init` infers the descriptor, `bayplan.toml`, from the main stack's Compose configuration and git: the router and its domain, the untracked files to link and to copy, the files to rewrite, groups of services (one per exposed service, one per image other services share, one-off tasks left out), dependency directories with their install command, and MySQL/MariaDB, RabbitMQ and Redis with their variables. Each line says where it comes from; what it cannot handle, as a database without a resource, is said in a note. It prints the descriptor, or writes it with `--write` when there is none.
 
 ## v0.3.0 · November 24, 2026
 

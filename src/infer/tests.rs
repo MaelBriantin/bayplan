@@ -69,6 +69,12 @@ fn repo(name: &str) -> Repo {
             "worker": {"image": "shop-api", "volumes": [bind("api")]},
             "api-image": {"build": {"context": at("api")}, "image": "shop-api"},
             "docs": {"build": {"context": at("web")}, "volumes": [bind("api")]},
+            "mail-consumer": {
+                "build": {"context": at("api")},
+                "image": "shop-consumer",
+                "volumes": [bind("api")],
+            },
+            "sms-consumer": {"image": "shop-consumer", "volumes": [bind("api")]},
             "mailpit": {
                 "image": "axllent/mailpit:v1",
                 "labels": {"traefik.http.routers.mail.rule": "Host(`mail.app.localhost`)"},
@@ -119,6 +125,7 @@ fn repo(name: &str) -> Repo {
         config,
         tracked: tracked.iter().map(|path| (*path).to_owned()).collect(),
         untracked: untracked.iter().map(|path| (*path).to_owned()).collect(),
+        ended: BTreeSet::new(),
     }
 }
 
@@ -163,9 +170,31 @@ fn groups_each_exposed_service_with_what_it_needs_then_the_others_alone() {
             group("nginx", &["nginx", "api"]),
             group("web", &["web"]),
             group("docs", &["docs"]),
+            group("consumers", &["mail-consumer", "sms-consumer"]),
             group("worker", &["worker"]),
         ]
     );
+    assert_eq!(
+        image_group("registry.io/shop-consumer:1", "shop"),
+        "consumers"
+    );
+    assert_eq!(image_group("jobs", "shop"), "jobs");
+    std::fs::remove_dir_all(repo.root).ok();
+}
+
+#[test]
+fn leaves_out_the_one_off_tasks_and_says_so() {
+    let mut repo = repo("one-off");
+    repo.ended = ["worker".to_owned()].into();
+    let inference = infer(&repo);
+    assert!(
+        !inference
+            .groups
+            .iter()
+            .any(|group| group.value.0 == "worker")
+    );
+    assert!(inference.notes.iter().any(|note| note
+        == "worker not offered in a group: they ran on the main stack and ended, as one-off tasks"));
     std::fs::remove_dir_all(repo.root).ok();
 }
 
@@ -181,7 +210,7 @@ fn links_what_compose_reads_and_copies_what_containers_read() {
     assert_eq!(values(&inference.copy), ["api/.env.local", "api/.ssh"]);
     assert_eq!(
         inference.copy[0].why,
-        "not in git, under api, mounted into api and 2 other services"
+        "not in git, under api, mounted into api and 4 other services"
     );
     assert_eq!(values(&inference.rewrite_files), ["docker/nginx.conf"]);
     assert_eq!(
@@ -201,7 +230,12 @@ fn finds_the_dependencies_beside_their_lockfile() {
             DepGuess {
                 path: "api/vendor".into(),
                 lockfile: "api/composer.lock".into(),
-                services: vec!["api".into(), "worker".into()],
+                services: vec![
+                    "api".into(),
+                    "mail-consumer".into(),
+                    "sms-consumer".into(),
+                    "worker".into(),
+                ],
                 command: vec!["composer".into(), "install".into()],
             },
             DepGuess {

@@ -28,6 +28,9 @@ fn why<T>(value: T, why: impl Into<String>) -> Why<T> {
     }
 }
 
+/// A group of services: its name and services, and why.
+pub type Group = Why<(String, Vec<String>)>;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct DepGuess {
     pub path: String,
@@ -70,7 +73,7 @@ pub struct Inference {
     pub link: Vec<Why<String>>,
     pub copy: Vec<Why<String>>,
     pub rewrite_files: Vec<Why<String>>,
-    pub groups: Vec<Why<(String, Vec<String>)>>,
+    pub groups: Vec<Group>,
     pub deps: Vec<Why<DepGuess>>,
     pub mysql: Option<Why<MysqlGuess>>,
     pub rabbitmq: Option<Why<RabbitmqGuess>>,
@@ -89,6 +92,9 @@ pub struct Repo {
     /// Files and directories git does not know, ignored or not, relative to the root; a directory with
     /// nothing tracked inside is listed alone.
     pub untracked: Vec<String>,
+    /// Services of the main stack whose container ran and ended without error, as one-off tasks: they are
+    /// not offered to the bays.
+    pub ended: BTreeSet<String>,
 }
 
 impl Repo {
@@ -100,9 +106,19 @@ impl Repo {
                 .map(|path| path.trim_end_matches('/').to_owned())
                 .collect())
         };
+        let config = runner::main_config(root)?;
+        let containers = config["name"]
+            .as_str()
+            .map_or_else(Vec::new, crate::commands::containers);
+        let ended = containers
+            .into_iter()
+            .filter(|container| container.state == "exited" && container.exit_code == 0)
+            .map(|container| container.service)
+            .collect();
         Ok(Self {
             root: root.to_path_buf(),
-            config: runner::main_config(root)?,
+            config,
+            ended,
             tracked: list(&["ls-files", "-z"])?.into_iter().collect(),
             untracked: list(&["ls-files", "-z", "--others", "--directory"])?,
         })
@@ -225,9 +241,10 @@ fn binds(repo: &Repo, service: &Value) -> Vec<String> {
 }
 
 pub fn infer(repo: &Repo) -> Inference {
+    let (groups, left_out) = infer_groups(repo);
     let mut inference = Inference {
         router: infer_router(repo),
-        groups: infer_groups(repo),
+        groups,
         deps: infer_deps(repo),
         rewrite_files: infer_rewrite_files(repo),
         ..Inference::default()
@@ -241,6 +258,12 @@ pub fn infer(repo: &Repo) -> Inference {
         .collect();
     inference.copy = infer_copy(repo, &linked, &deps);
     infer_resources(repo, &mut inference);
+    if !left_out.is_empty() {
+        inference.notes.push(format!(
+            "{} not offered in a group: they ran on the main stack and ended, as one-off tasks",
+            left_out.join(", ")
+        ));
+    }
     if inference.router.is_none() {
         inference.notes.push(
             "no Traefik router found: bayplan only knows Traefik for now; write [router] by hand"
@@ -289,8 +312,9 @@ fn common_domain(hosts: &[String]) -> Option<String> {
 }
 
 /// A group per service of the repository's code the router exposes, with such services it depends on; then
-/// a group per other one.
-fn infer_groups(repo: &Repo) -> Vec<Why<(String, Vec<String>)>> {
+/// a group per image several other ones run, as consumers; then a group per other one. Services the main
+/// stack does not run, as one-off tasks, are left out, and returned.
+fn infer_groups(repo: &Repo) -> (Vec<Group>, Vec<String>) {
     let services = repo.services();
     let built: BTreeMap<&str, &Value> = services
         .iter()
@@ -304,7 +328,6 @@ fn infer_groups(repo: &Repo) -> Vec<Why<(String, Vec<String>)>> {
         let Some(host) = exposed(service) else {
             continue;
         };
-        let mut members = vec![(*name).to_owned()];
         let with: Vec<String> = depends_on(service)
             .into_iter()
             .filter(|dep| {
@@ -313,28 +336,61 @@ fn infer_groups(repo: &Repo) -> Vec<Why<(String, Vec<String>)>> {
                     .is_some_and(|s| exposed(s).is_none())
             })
             .collect();
-        grouped.insert(*name);
-        grouped.extend(
-            with.iter()
-                .map(String::as_str)
-                .filter_map(|dep| built.get_key_value(dep))
-                .map(|(k, _)| *k),
-        );
+        grouped.insert((*name).to_owned());
+        grouped.extend(with.iter().cloned());
         let reason = if with.is_empty() {
             format!("exposed at {host}")
         } else {
             format!("exposed at {host}, with what it depends on")
         };
-        members.extend(with);
+        let members = std::iter::once((*name).to_owned()).chain(with).collect();
         groups.push(why(((*name).to_owned(), members), reason));
     }
-    for name in built.keys().filter(|name| !grouped.contains(*name)) {
-        groups.push(why(
-            ((*name).to_owned(), vec![(*name).to_owned()]),
-            "runs code of the repository, not exposed",
-        ));
+
+    let (others, left_out): (Vec<&str>, Vec<&str>) = built
+        .keys()
+        .copied()
+        .filter(|name| !grouped.contains(*name))
+        .partition(|name| !repo.ended.contains(*name));
+    let mut by_image: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for name in &others {
+        if let Some(image) = built[name]["image"].as_str() {
+            by_image.entry(image).or_default().push(name);
+        }
     }
-    groups
+    let project = repo.config["name"].as_str().unwrap_or_default();
+    for name in &others {
+        let image = built[name]["image"].as_str();
+        match image.and_then(|image| by_image.get(image).map(|members| (image, members))) {
+            Some((image, members)) if members.len() > 1 => {
+                if members[0] == *name {
+                    let group = image_group(image, project);
+                    groups.push(why(
+                        (group, members.iter().map(|m| (*m).to_owned()).collect()),
+                        format!("not exposed, all running the image {image}"),
+                    ));
+                }
+            }
+            _ => groups.push(why(
+                ((*name).to_owned(), vec![(*name).to_owned()]),
+                "runs code of the repository, not exposed",
+            )),
+        }
+    }
+    (groups, left_out.into_iter().map(str::to_owned).collect())
+}
+
+/// Name of a group of the services running an image: the image's name without its registry, tag and the
+/// project's prefix, in the plural, as `consumers` for `registry/shop-consumer:1`.
+fn image_group(image: &str, project: &str) -> String {
+    let name = image.rsplit('/').next().unwrap_or(image);
+    let name = name.split(':').next().unwrap_or(name);
+    let name = name.strip_prefix(&format!("{project}-")).unwrap_or(name);
+    if name.ends_with('s') {
+        name.to_owned()
+    } else {
+        format!("{name}s")
+    }
 }
 
 /// Lockfiles and the dependency directory beside them, with the command installing it.
