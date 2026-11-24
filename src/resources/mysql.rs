@@ -137,3 +137,116 @@ impl Resource for Mysql<'_> {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::exec::tests::FakeDocker;
+
+    fn config() -> MysqlConfig {
+        MysqlConfig {
+            service: "mysql".to_owned(),
+            client: "mariadb".to_owned(),
+            dump: "mariadb-dump".to_owned(),
+            root_password_env: "MYSQL_ROOT_PASSWORD".to_owned(),
+            database: "app".to_owned(),
+            user: "app".to_owned(),
+            database_vars: vec!["DATABASE_NAME".to_owned()],
+        }
+    }
+
+    fn dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bayplan-mysql-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        dir
+    }
+
+    fn provision(root: &Path, state: &mut Value) -> Result<bool> {
+        let config = config();
+        let envs = [Env::from([("DATABASE_NAME".to_owned(), "app".to_owned())])];
+        let context = Context {
+            root,
+            bay: "feat-1",
+            options: &toml::toml! { clone = true },
+            envs: &envs,
+            main_envs: &[],
+            others: &[],
+        };
+        Mysql { config: &config }.provision(&context, state)
+    }
+
+    #[test]
+    fn points_the_database_variables_at_the_clone() {
+        let config = config();
+        let mysql = Mysql { config: &config };
+        let env = Env::from([
+            ("DATABASE_NAME".to_owned(), "app".to_owned()),
+            ("DATABASE_HOST".to_owned(), "mysql".to_owned()),
+        ]);
+        assert_eq!(
+            mysql.env(&json!({"database": "app_bay_demo"}), &env),
+            Env::from([("DATABASE_NAME".to_owned(), "app_bay_demo".to_owned())])
+        );
+        assert!(
+            mysql
+                .env(&json!({"database": "app_bay_demo", "paused": true}), &env)
+                .is_empty()
+        );
+        assert!(mysql.env(&Value::Null, &env).is_empty());
+    }
+
+    #[test]
+    fn records_the_clone_once_copied() {
+        let dir = dir("clone");
+        let docker = FakeDocker::install(&dir);
+        let mut state = Value::Null;
+        assert!(provision(&dir, &mut state).unwrap());
+        assert_eq!(
+            state,
+            json!({"database": "app_bay_feat_1", "paused": false})
+        );
+        let calls = docker.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].contains("CREATE DATABASE \\`app_bay_feat_1\\`"));
+        assert!(calls[1].contains("mariadb-dump"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn drops_the_clone_when_the_copy_fails() {
+        let dir = dir("clone-failed");
+        let docker = FakeDocker::install(&dir);
+        docker.fail_on("mariadb-dump");
+        let mut state = Value::Null;
+        assert!(provision(&dir, &mut state).is_err());
+        assert_eq!(state, Value::Null);
+        assert!(docker.calls()[2].contains("DROP DATABASE IF EXISTS \\`app_bay_feat_1\\`"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn drops_the_clone_on_teardown_and_keeps_it_when_that_fails() {
+        let dir = dir("teardown");
+        let docker = FakeDocker::install(&dir);
+        let config = config();
+        let mysql = Mysql { config: &config };
+
+        docker.fail_on("DROP DATABASE");
+        let mut state = json!({"database": "app_bay_demo"});
+        assert!(mysql.teardown(&dir, &mut state).is_err());
+        assert_eq!(state, json!({"database": "app_bay_demo"}));
+
+        std::fs::remove_file(dir.join("fail")).unwrap();
+        mysql.teardown(&dir, &mut state).unwrap();
+        assert_eq!(state, Value::Null);
+        assert!(docker.calls()[1].contains("DROP DATABASE IF EXISTS \\`app_bay_demo\\`"));
+
+        mysql.teardown(&dir, &mut state).unwrap();
+        assert_eq!(docker.calls().len(), 2);
+        std::fs::remove_dir_all(dir).ok();
+    }
+}

@@ -470,6 +470,17 @@ pub fn down(name: &str) -> Result<()> {
 
 pub fn rm(name: &str, force: bool) -> Result<()> {
     let bay = Bay::open(name)?;
+    let resources = resources::from_config(&bay.descriptor.resources);
+    remove(&bay, &resources, force, &confirm)
+}
+
+fn remove(
+    bay: &Bay,
+    resources: &[Box<dyn Resource + '_>],
+    force: bool,
+    confirm: &dyn Fn(&str) -> Result<bool>,
+) -> Result<()> {
+    let name = &bay.name;
     let _lock = Lock::acquire(&bay.layout.lock())?;
     let worktree = bay.worktree();
     if worktree.exists() && !force {
@@ -498,7 +509,7 @@ pub fn rm(name: &str, force: bool) -> Result<()> {
 
     let mut state = BayState::load(&bay.state_path())?;
     let mut failed = Vec::new();
-    for resource in resources::from_config(&bay.descriptor.resources) {
+    for resource in resources {
         if let Err(error) = resource.teardown(bay.root(), state.resource_mut(resource.name())) {
             eprintln!("warning: cannot remove {}: {error:#}", resource.name());
             failed.push(resource.name());
@@ -581,7 +592,14 @@ pub fn confirm(question: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use serde_json::json;
+
     use super::*;
+    use crate::compose::transform::Env;
+    use crate::exec::tests::FakeDocker;
     use crate::git::tests::{create_branch, repo};
 
     fn bay(root: &Path) -> Bay {
@@ -730,6 +748,233 @@ mod tests {
         rollback(&bay, &[], &mut BayState::default(), &created);
         assert!(!bay.worktree().exists());
         assert!(git::branch_exists(&root, "feat/x"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A resource logging its teardowns, failing them when told to.
+    struct Recorder {
+        name: &'static str,
+        fails: bool,
+        log: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl Resource for Recorder {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn provision(&self, _: &Context, _: &mut Value) -> Result<bool> {
+            unreachable!()
+        }
+
+        fn teardown(&self, _: &Path, state: &mut Value) -> Result<()> {
+            self.log.borrow_mut().push(self.name);
+            if self.fails {
+                bail!("{} cannot be removed", self.name);
+            }
+            *state = Value::Null;
+            Ok(())
+        }
+
+        fn env(&self, _: &Value, _: &Env) -> Env {
+            Env::new()
+        }
+    }
+
+    fn recorders(failing: &[&str], log: &Rc<RefCell<Vec<&'static str>>>) -> Vec<Box<dyn Resource>> {
+        ["mysql", "rabbitmq", "redis"]
+            .into_iter()
+            .map(|name| -> Box<dyn Resource> {
+                Box::new(Recorder {
+                    name,
+                    fails: failing.contains(&name),
+                    log: Rc::clone(log),
+                })
+            })
+            .collect()
+    }
+
+    /// A state holding a share of each recorder.
+    fn shared_state() -> BayState {
+        let mut state = BayState::default();
+        for name in ["mysql", "rabbitmq", "redis"] {
+            *state.resource_mut(name) = json!({"share": name});
+        }
+        state
+    }
+
+    fn never_asked(question: &str) -> Result<bool> {
+        panic!("asked: {question}")
+    }
+
+    #[test]
+    fn rollback_undoes_the_shares_in_reverse_and_goes_on_after_a_failure() {
+        let root = repo("rollback-shares");
+        let bay = bay(&root);
+        let log = Rc::default();
+        let resources = recorders(&["rabbitmq"], &log);
+        let created = Created {
+            resources: vec![(0, Value::Null), (1, Value::Null), (2, Value::Null)],
+            ..Created::default()
+        };
+        let mut state = shared_state();
+        rollback(&bay, &resources, &mut state, &created);
+        assert_eq!(*log.borrow(), ["redis", "rabbitmq", "mysql"]);
+        let saved = BayState::load(&bay.state_path()).unwrap();
+        assert_eq!(saved.resources.keys().collect::<Vec<_>>(), ["rabbitmq"]);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rollback_keeps_a_share_the_bay_had_before_the_run() {
+        let root = repo("rollback-kept");
+        let bay = bay(&root);
+        let log = Rc::default();
+        let resources = recorders(&[], &log);
+        let created = Created {
+            resources: vec![(0, json!({"share": "mysql"}))],
+            ..Created::default()
+        };
+        rollback(&bay, &resources, &mut shared_state(), &created);
+        assert!(log.borrow().is_empty());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rollback_stops_the_project_it_started_then_removes_the_worktree() {
+        let root = repo("rollback-project");
+        let docker = FakeDocker::install(&root.join("docker"));
+        let bay = bay(&root);
+        let project = bay.project();
+        git::add_worktree(&root, &bay.worktree(), "HEAD").unwrap();
+        std::fs::create_dir_all(bay.dir()).unwrap();
+        std::fs::write(&project.file, "{}").unwrap();
+        let created = Created {
+            worktree: true,
+            project: true,
+            ..Created::default()
+        };
+        rollback(&bay, &[], &mut BayState::default(), &created);
+        assert_eq!(docker.calls().len(), 1);
+        assert!(docker.calls()[0].ends_with("down --remove-orphans --volumes"));
+        assert!(!project.file.exists());
+        assert!(!bay.worktree().exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rollback_leaves_alone_what_the_run_did_not_create() {
+        let root = repo("rollback-nothing");
+        let docker = FakeDocker::install(&root.join("docker"));
+        let bay = bay(&root);
+        git::add_worktree(&root, &bay.worktree(), "HEAD").unwrap();
+        std::fs::create_dir_all(bay.dir()).unwrap();
+        std::fs::write(bay.project().file, "{}").unwrap();
+        rollback(&bay, &[], &mut BayState::default(), &Created::default());
+        assert!(bay.worktree().exists());
+        assert!(bay.project().file.exists());
+        assert_eq!(docker.calls(), Vec::<String>::new());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A bay as `bp up` leaves it: a worktree, a started project and a share of each recorder.
+    fn bay_up(name: &str) -> (PathBuf, Bay, FakeDocker) {
+        let root = repo(name);
+        let docker = FakeDocker::install(&root.join("docker"));
+        let bay = bay(&root);
+        git::add_worktree(&root, &bay.worktree(), "HEAD").unwrap();
+        std::fs::create_dir_all(bay.dir()).unwrap();
+        std::fs::write(bay.project().file, "{}").unwrap();
+        shared_state().save(&bay.state_path()).unwrap();
+        (root, bay, docker)
+    }
+
+    #[test]
+    fn removes_a_clean_bay_without_asking() {
+        let (root, bay, docker) = bay_up("rm-clean");
+        let log = Rc::default();
+        remove(&bay, &recorders(&[], &log), false, &never_asked).unwrap();
+        assert!(docker.calls()[0].ends_with("down --remove-orphans --volumes"));
+        assert_eq!(*log.borrow(), ["mysql", "rabbitmq", "redis"]);
+        assert!(!bay.worktree().exists());
+        assert!(!bay.dir().exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn keeps_everything_when_removing_uncommitted_work_is_refused() {
+        let (root, bay, docker) = bay_up("rm-refused");
+        std::fs::write(bay.worktree().join("draft.txt"), "wip").unwrap();
+        let log = Rc::default();
+        let questions = RefCell::new(Vec::new());
+        let refuse = |question: &str| {
+            questions.borrow_mut().push(question.to_owned());
+            Ok(false)
+        };
+        assert!(remove(&bay, &recorders(&[], &log), false, &refuse).is_err());
+        assert!(questions.borrow()[0].contains("uncommitted changes"));
+        assert_eq!(docker.calls(), Vec::<String>::new());
+        assert!(log.borrow().is_empty());
+        assert!(bay.worktree().join("draft.txt").exists());
+        assert_eq!(
+            BayState::load(&bay.state_path()).unwrap().resources.len(),
+            3
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn asks_before_losing_commits_no_branch_holds() {
+        let (root, bay, _docker) = bay_up("rm-unreferenced");
+        let status = std::process::Command::new("git")
+            .current_dir(bay.worktree())
+            .args([
+                "-c",
+                "user.name=bayplan",
+                "-c",
+                "user.email=bayplan@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "work",
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let questions = RefCell::new(Vec::new());
+        let refuse = |question: &str| {
+            questions.borrow_mut().push(question.to_owned());
+            Ok(false)
+        };
+        assert!(remove(&bay, &[], false, &refuse).is_err());
+        assert!(questions.borrow()[0].contains("commits on no branch"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn force_removes_uncommitted_work_without_asking() {
+        let (root, bay, _docker) = bay_up("rm-force");
+        std::fs::write(bay.worktree().join("draft.txt"), "wip").unwrap();
+        remove(&bay, &recorders(&[], &Rc::default()), true, &never_asked).unwrap();
+        assert!(!bay.worktree().exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn keeps_the_worktree_and_the_state_of_a_share_it_cannot_remove() {
+        let (root, bay, _docker) = bay_up("rm-share-failed");
+        let log = Rc::default();
+        let error = remove(&bay, &recorders(&["rabbitmq"], &log), false, &never_asked)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("rabbitmq"));
+        assert_eq!(*log.borrow(), ["mysql", "rabbitmq", "redis"]);
+        assert!(bay.worktree().exists());
+        let saved = BayState::load(&bay.state_path()).unwrap();
+        assert_eq!(saved.resources.keys().collect::<Vec<_>>(), ["rabbitmq"]);
         std::fs::remove_dir_all(root).ok();
     }
 }
