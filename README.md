@@ -14,6 +14,8 @@ bay `demo`   dashboard-demo.app.localhost ──> dashboard-app-demo ─┘    (
                                                   └──> web-demo ──> api-demo    (bay copies)
 ```
 
+What each version brought is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Principles
 
 bayplan aims to infer what it can from the Compose configuration, so that it works without blocking in most
