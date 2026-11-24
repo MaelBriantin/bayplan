@@ -1,6 +1,6 @@
 [package]
 name = "bayplan"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Runs an isolated copy of part of a Docker Compose stack for each git worktree."
 repository = "https://github.com/MaelBriantin/bayplan"
