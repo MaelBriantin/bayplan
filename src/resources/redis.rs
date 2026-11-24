@@ -127,6 +127,19 @@ impl Resource for Redis<'_> {
         Ok(())
     }
 
+    fn describe(&self, state: &Value) -> String {
+        let typed: State = load(state);
+        if typed.indexes.is_empty() {
+            return "not used by the bay's services".to_owned();
+        }
+        typed
+            .indexes
+            .iter()
+            .map(|(main, bay)| format!("own database {bay} (main stack: {main})"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     fn env(&self, state: &Value, env: &Env) -> Env {
         let typed: State = load(state);
         self.indexes_used(env)

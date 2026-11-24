@@ -59,6 +59,10 @@ pub trait Resource {
 
     /// Variables pointing a service at the share of the bay, from the original environment of the service.
     fn env(&self, state: &Value, env: &Env) -> Env;
+
+    /// What the bay has of the resource, in a few words for the people running it: its own share, or the
+    /// main stack's when it has none.
+    fn describe(&self, state: &Value) -> String;
 }
 
 /// Reads the typed state of a resource: the default one when the bay has none yet, or an unreadable one.

@@ -78,6 +78,13 @@ impl Resource for Rabbitmq<'_> {
         Ok(())
     }
 
+    fn describe(&self, state: &Value) -> String {
+        match load::<State>(state).vhost {
+            Some(vhost) => format!("own vhost: {vhost}"),
+            None => "not used by the bay's services".to_owned(),
+        }
+    }
+
     fn env(&self, state: &Value, env: &Env) -> Env {
         let typed: State = load(state);
         let Some(vhost) = &typed.vhost else {

@@ -92,12 +92,47 @@ bp up <bay> [--from <ref>] [--branch <name>] [--build]   # create what is missin
 bp down <bay>                          # stop, keeping the worktree and resources
 bp rm <bay> [--force]                  # remove containers, resources, registrations and worktree
 bp ls                                  # list the bays, their state, branch and HEAD, and hosts
+bp watch                               # follow the bays: containers, URLs to open, logs
 bp update                              # install the latest release
 bp uninstall                           # remove bp, leaving the bays as they are
 ```
 
 Run it from anywhere in the repository. `rm` asks before removing a worktree with uncommitted changes or
 unreferenced commits, unless `--force`; it keeps the bay config and the worktree's branch.
+
+`watch` shows the main stack, then the bays, with their branch (`●` for uncommitted changes, `↑`/`↓` for
+commits ahead of and behind the upstream) and, for the selected one, its containers, its URLs, what it has
+of each resource (its own share, or the main stack's), and the logs of the selected container, read again
+every 2 seconds; it says so when Docker is not reachable. Started inside a bay's worktree, it selects that
+bay. `?` lists the keys:
+
+- `↑↓` (or `j`/`k`) selects, `←`/`→` (or `h`/`l`, `Tab`) moves between the bays and their containers;
+- `1`–`9` opens a URL in the browser, `p` the pull request of the selected branch (with the GitHub CLI,
+  `gh`);
+- `e` opens the selected worktree in `$VISUAL` or `$EDITOR` (see below), `y` copies its path;
+- `i` shows what the selected bay is made of: its groups and their services, `from`, `branch`, worktree;
+- `c` measures the CPU and memory of the main stack, of each bay, of all the bays and of everything;
+- `u`, `U`, `d` run `bp up`, `bp up --build`, `bp down` on the selected bay, `u` and `U` run
+  `docker compose up -d` and `up -d --build` on the main stack; `x` runs `bp rm` once confirmed; `r`
+  restarts the selected container: the command's output shows in a window over the screen, closed with
+  `q` or `Esc` once it ends;
+- `z` puts the logs on the whole screen, `PgUp`/`PgDn` (or `Ctrl-u`/`Ctrl-d`) scroll them, `g`/`G` go to
+  their top and end;
+- `Esc` leaves the zoom, then the screen; `q` quits.
+
+`e` opens the editor beside the screen when it can:
+
+1. with the command in `$BAYPLAN_EDIT`, where `{dir}` stands for the worktree and `{editor}` for the
+   editor, to open it in a new tab or window of any terminal:
+
+   ```sh
+   export BAYPLAN_EDIT='kitty @ launch --type=tab --cwd {dir} {editor} {dir}'   # kitty
+   export BAYPLAN_EDIT='wezterm cli spawn --cwd {dir} -- {editor} {dir}'        # WezTerm
+   export BAYPLAN_EDIT='zellij run --cwd {dir} -- {editor} {dir}'               # Zellij
+   ```
+
+2. inside Rex or tmux, in a new window, with no setting;
+3. otherwise in the terminal of `watch`, which comes back when the editor quits.
 
 ## AI agents
 
