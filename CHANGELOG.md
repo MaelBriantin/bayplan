@@ -10,6 +10,7 @@ Numbers: a minor version (0.2.0) for something new to use, a command, an option,
 Written as the work goes, under the same New, Changed and Fixed; it becomes the next version's section when it is released.
 
 ### New
+- A bay config can name a service of the main stack in `groups`, for that service alone, without a group in the descriptor.
 - `bp ls --json` prints each bay in full, for scripts and agents: its state, branch, uncommitted changes, commits ahead and behind, URLs, containers with their health, resources and groups.
 
 ## v0.4.0 · November 25, 2026

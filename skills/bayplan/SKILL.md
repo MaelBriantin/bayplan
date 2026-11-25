@@ -28,7 +28,7 @@ services; everything it does not duplicate is reached on the main stack.
 2. Write `.bayplan/bays/<bay>.toml`, with a lowercase name (letters, digits, dashes):
 
    ```toml
-   groups = ["dashboard"]    # groups of the descriptor
+   groups = ["dashboard"]    # groups of the descriptor, or service names, each alone
    from = "main"             # git ref the worktree starts from; defaults to HEAD
    branch = "feat/demo"      # optional: branch to check out, created if missing
    ```

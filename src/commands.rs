@@ -101,18 +101,30 @@ impl Bay {
         read_toml(&path)
     }
 
+    /// The services of the bay's groups; a name no group bears stands for the service of that name, alone.
     fn services(&self, config: &BayConfig) -> Result<BTreeSet<String>> {
         let mut services = BTreeSet::new();
+        let mut alone = Vec::new();
         for group in &config.groups {
-            let Some(members) = self.descriptor.groups.get(group) else {
+            match self.descriptor.groups.get(group) {
+                Some(members) => services.extend(members.iter().cloned()),
+                None => alone.push(group),
+            }
+        }
+        if !alone.is_empty() {
+            let main = runner::main_config(self.root())?;
+            let all = main["services"]
+                .as_object()
+                .context("the Compose configuration has no services")?;
+            if let Some(unknown) = alone.iter().find(|name| !all.contains_key(name.as_str())) {
                 let known: Vec<&str> = self.descriptor.groups.keys().map(String::as_str).collect();
                 bail!(
-                    "unknown group `{group}` in the config of bay `{}`; the groups are: {}",
+                    "unknown group `{unknown}` in the config of bay `{}`: neither a group ({}) nor a service of the main stack",
                     self.name,
                     known.join(", ")
                 );
-            };
-            services.extend(members.iter().cloned());
+            }
+            services.extend(alone.into_iter().cloned());
         }
         if services.is_empty() {
             bail!(
@@ -833,6 +845,38 @@ mod tests {
 
     fn config(toml: &str) -> BayConfig {
         toml::from_str(&format!("groups = []\n{toml}")).unwrap()
+    }
+
+    #[test]
+    fn takes_a_service_name_as_a_group_of_that_service_alone() {
+        let root = repo("service-groups");
+        let docker = FakeDocker::install(&root.join("docker"));
+        let mut bay = bay(&root);
+        bay.descriptor
+            .groups
+            .insert("web".to_owned(), vec!["web".to_owned(), "api".to_owned()]);
+        let groups = |names: &str| BayConfig {
+            groups: names.split(' ').map(str::to_owned).collect(),
+            ..config("")
+        };
+
+        assert_eq!(
+            bay.services(&groups("web")).unwrap(),
+            BTreeSet::from(["api".to_owned(), "web".to_owned()])
+        );
+        assert_eq!(docker.calls(), Vec::<String>::new());
+
+        docker.output(r#"{"services": {"web": {}, "api": {}, "cron": {}}}"#);
+        assert_eq!(
+            bay.services(&groups("web cron")).unwrap(),
+            BTreeSet::from(["api".to_owned(), "cron".to_owned(), "web".to_owned()])
+        );
+        let error = bay.services(&groups("nope")).unwrap_err().to_string();
+        assert_eq!(
+            error,
+            "unknown group `nope` in the config of bay `demo`: neither a group (web) nor a service of the main stack"
+        );
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

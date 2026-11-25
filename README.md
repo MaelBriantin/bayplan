@@ -172,7 +172,8 @@ setup. `.bayplan/` is local to each machine: keep it out of git (`.gitignore`, o
 ### Bay config — `.bayplan/bays/<bay>.toml`
 
 ```toml
-groups = ["back", "dashboard"]   # groups of the descriptor to duplicate
+groups = ["back", "dashboard"]   # groups of the descriptor to duplicate; a service name stands
+                                  # for that service alone
 from = "main"                     # git ref the worktree starts from (default: HEAD)
 branch = "feat/demo"              # branch the worktree checks out, created from `from` if missing
                                   # (default: detached HEAD)
