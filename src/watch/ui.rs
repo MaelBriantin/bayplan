@@ -10,7 +10,7 @@ use super::action::{Action, Status};
 use super::{App, Focus, Modal};
 use crate::commands::{BayStatus, Container};
 
-const HELP: &str = "↑↓←→ move · 1-9 URL · p PR · e edit · i info · z logs · ? keys · q quit";
+const MOVE: &str = "↑↓←→ move · 1-9 URL · ? keys · q quit";
 
 /// Every key, for the `?` window.
 const KEYS: &[(&str, &str)] = &[
@@ -95,7 +95,18 @@ fn footer_line(app: &App) -> Line<'_> {
     match (&app.message, &app.trouble) {
         (Some(message), _) => Line::from(format!(" {message}")).fg(Color::Yellow),
         (None, Some(trouble)) => Line::from(format!(" {trouble}")).fg(Color::Red),
-        (None, None) => Line::from(HELP).dim(),
+        (None, None) => Line::from(format!("{} · {MOVE}", actions(app))).dim(),
+    }
+}
+
+/// The actions on what is selected, first: the other keys are in the `?` window.
+fn actions(app: &App) -> &'static str {
+    if app.focus == Focus::Containers && app.selected_container().is_some() {
+        "r restart"
+    } else if app.on_main() {
+        "u up · U build"
+    } else {
+        "u up · d down · x rm"
     }
 }
 
@@ -727,7 +738,7 @@ mod tests {
                 "[1] https://web-demo.app.localhost",
                 "Logs · web",
                 "line 40",
-                HELP,
+                "u up · d down · x rm · ↑↓←→ move",
             ],
         );
         assert!(!screen.contains("line 1 "));
@@ -790,8 +801,11 @@ mod tests {
                 "Main stack",
                 "▌ shop  up 1/1",
                 "main stack · shop · feat/x@abc1234 · up 1/1",
+                "u up · U build · ↑↓←→ move",
             ],
         );
+        app.focus = Focus::Containers;
+        assert_shows(&screen(&app, 100, 24), &["r restart · ↑↓←→ move"]);
     }
 
     #[test]
