@@ -9,13 +9,15 @@ Numbers: a minor version (0.2.0) for something new to use, a command, an option,
 ## Unreleased
 Written as the work goes, under the same New, Changed and Fixed; it becomes the next version's section when it is released.
 
+## v0.4.0 · November 25, 2026
+
+### New
+- `bp init` infers the descriptor, `bayplan.toml`, from the main stack's Compose configuration and git: the router and its domain, the untracked files to link and to copy, the files to rewrite, groups of services (one per exposed service, one per image other services share, one-off tasks left out), dependency directories with their install command, and MySQL/MariaDB, RabbitMQ and Redis with their variables. Each line says where it comes from; what it cannot handle, as a database without a resource, is said in a note. It prints the descriptor, or writes it with `--write` when there is none.
+
 ### Changed
 - `bayplan.toml` is optional: what it leaves out is inferred when a bay starts, as `bp init` does, and `bp up` tells what it inferred. A key stated, even an empty list, is taken as is. The shared resources are never inferred: without them, `bp up` warns that the bays share the main stack's databases, queues and caches. `bp down` and `bp rm` never infer.
 - An unknown group in a bay config lists the groups there are.
 - The bottom line of `bp watch` shows first the keys acting on the selection: `u`, `d` and `x` on a bay, `u` and `U` on the main stack, `r` on a container; `e`, `p`, `i` and `z` are listed by `?` alone.
-
-### New
-- `bp init` infers the descriptor, `bayplan.toml`, from the main stack's Compose configuration and git: the router and its domain, the untracked files to link and to copy, the files to rewrite, groups of services (one per exposed service, one per image other services share, one-off tasks left out), dependency directories with their install command, and MySQL/MariaDB, RabbitMQ and Redis with their variables. Each line says where it comes from; what it cannot handle, as a database without a resource, is said in a note. It prints the descriptor, or writes it with `--write` when there is none.
 
 ## v0.3.0 · November 24, 2026
 
