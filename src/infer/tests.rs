@@ -147,6 +147,14 @@ fn infers_the_router_and_its_domain() {
         Some("app.localhost")
     );
     assert_eq!(common_domain(&["a.com".into(), "b.org".into()]), None);
+    assert_eq!(
+        common_domain(&["web.test.localhost".into(), "web.test.localhost".into()]).as_deref(),
+        Some("test.localhost")
+    );
+    assert_eq!(
+        common_domain(&["app.localhost".into()]).as_deref(),
+        Some("app.localhost")
+    );
     std::fs::remove_dir_all(repo.root).ok();
 }
 

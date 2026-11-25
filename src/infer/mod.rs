@@ -1,7 +1,10 @@
 //! `bp init`: the descriptor inferred from the Compose configuration of the main stack and git, each line
 //! saying where it comes from, to review before keeping it.
 
+mod complete;
 mod render;
+
+pub use complete::complete;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -291,7 +294,11 @@ fn infer_router(repo: &Repo) -> Option<Why<String>> {
         .count();
     Some(why(
         domain.clone(),
-        format!("{services} services carry Traefik rules; their hosts end with {domain}"),
+        if services == 1 {
+            format!("1 service carries Traefik rules; its host is under {domain}")
+        } else {
+            format!("{services} services carry Traefik rules; their hosts end with {domain}")
+        },
     ))
 }
 
@@ -308,7 +315,15 @@ fn common_domain(hosts: &[String]) -> Option<String> {
         .take_while(|(index, label)| labels.iter().all(|other| other.get(*index) == Some(label)))
         .map(|(_, label)| *label)
         .collect::<Vec<_>>();
-    (common.len() >= 2).then(|| common.into_iter().rev().collect::<Vec<_>>().join("."))
+    // A single host is a service's own: the domain is what it lives under.
+    let whole =
+        common.len() == first.len() && labels.iter().all(|other| other.len() == first.len());
+    let common = if whole && common.len() >= 3 {
+        &common[..common.len() - 1]
+    } else {
+        &common[..]
+    };
+    (common.len() >= 2).then(|| common.iter().rev().copied().collect::<Vec<_>>().join("."))
 }
 
 /// A group per service of the repository's code the router exposes, with such services it depends on; then

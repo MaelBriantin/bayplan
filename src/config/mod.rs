@@ -8,7 +8,8 @@ use serde::de::DeserializeOwned;
 
 pub use bay::BayConfig;
 pub use descriptor::{
-    Dep, Descriptor, MysqlConfig, RabbitmqConfig, RedisConfig, Registration, Resources, RouterKind,
+    Dep, Descriptor, Install, MysqlConfig, RabbitmqConfig, RedisConfig, Registration, Resources,
+    RouterConfig, RouterKind, Stated,
 };
 
 use crate::git;

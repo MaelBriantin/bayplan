@@ -29,6 +29,54 @@ pub struct Descriptor {
     pub registrations: Vec<Registration>,
 }
 
+/// What `bayplan.toml` states: a key left out is inferred, an empty list states that there is none.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Stated {
+    pub router: Option<RouterConfig>,
+    pub link: Option<Vec<PathBuf>>,
+    pub copy: Option<Vec<PathBuf>>,
+    pub rewrite_files: Option<Vec<PathBuf>>,
+    pub groups: Option<BTreeMap<String, Vec<String>>>,
+    pub deps: Option<Vec<Dep>>,
+    /// Never inferred: a resource changes the shared services of the main stack.
+    #[serde(default)]
+    pub resources: Resources,
+    /// Never inferred.
+    #[serde(default)]
+    pub registrations: Vec<Registration>,
+}
+
+impl Stated {
+    /// Whether every key that can be inferred is stated.
+    pub fn is_complete(&self) -> bool {
+        self.router.is_some()
+            && self.link.is_some()
+            && self.copy.is_some()
+            && self.rewrite_files.is_some()
+            && self.groups.is_some()
+            && self.deps.is_some()
+    }
+
+    /// The descriptor from what is stated alone, for commands that stop or remove a bay: they need neither
+    /// its router nor its groups.
+    pub fn alone(self) -> Descriptor {
+        Descriptor {
+            router: self.router.unwrap_or(RouterConfig {
+                kind: RouterKind::Traefik,
+                domain: String::new(),
+            }),
+            link: self.link.unwrap_or_default(),
+            copy: self.copy.unwrap_or_default(),
+            rewrite_files: self.rewrite_files.unwrap_or_default(),
+            groups: self.groups.unwrap_or_default(),
+            deps: self.deps.unwrap_or_default(),
+            resources: self.resources,
+            registrations: self.registrations,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouterConfig {

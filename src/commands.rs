@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::compose::runner::{self, Project};
 use crate::compose::transform::{self, Env, Input, env_of, suffixed};
-use crate::config::{self, BayConfig, Descriptor, Layout, read_toml};
+use crate::config::{self, BayConfig, Descriptor, Layout, Stated, read_toml};
 use crate::lock::Lock;
 use crate::resources::{self, Context, Resource};
 use crate::state::BayState;
@@ -17,24 +17,44 @@ struct Bay {
     name: String,
     layout: Layout,
     descriptor: Descriptor,
+    /// What the descriptor leaves out and was inferred, and what the bays share for want of a resource.
+    told: Vec<String>,
+}
+
+/// What `bayplan.toml` states, or nothing without one.
+fn stated(layout: &Layout) -> Result<Stated> {
+    let path = layout.descriptor();
+    if path.exists() {
+        read_toml(&path)
+    } else {
+        Ok(Stated::default())
+    }
 }
 
 impl Bay {
+    /// The bay with the descriptor completed by what is inferred.
     fn open(name: &str) -> Result<Self> {
         config::validate_bay_name(name)?;
         let layout = Layout::discover()?;
-        let path = layout.descriptor();
-        if !path.exists() {
-            bail!(
-                "no descriptor for this repository: create {}",
-                path.display()
-            );
-        }
-        let descriptor = read_toml(&path)?;
+        let (descriptor, told) = crate::infer::complete(&layout.root, stated(&layout)?)?;
         Ok(Self {
             name: name.to_owned(),
             layout,
             descriptor,
+            told,
+        })
+    }
+
+    /// The bay with what the descriptor states alone, enough to stop or remove it.
+    fn open_to_stop(name: &str) -> Result<Self> {
+        config::validate_bay_name(name)?;
+        let layout = Layout::discover()?;
+        let descriptor = stated(&layout)?.alone();
+        Ok(Self {
+            name: name.to_owned(),
+            layout,
+            descriptor,
+            told: Vec::new(),
         })
     }
 
@@ -85,9 +105,11 @@ impl Bay {
         let mut services = BTreeSet::new();
         for group in &config.groups {
             let Some(members) = self.descriptor.groups.get(group) else {
+                let known: Vec<&str> = self.descriptor.groups.keys().map(String::as_str).collect();
                 bail!(
-                    "unknown group `{group}` in the config of bay `{}`",
-                    self.name
+                    "unknown group `{group}` in the config of bay `{}`; the groups are: {}",
+                    self.name,
+                    known.join(", ")
                 );
             };
             services.extend(members.iter().cloned());
@@ -141,6 +163,9 @@ struct Created {
 
 pub fn up(name: &str, from: Option<&str>, branch: Option<&str>, build: bool) -> Result<()> {
     let bay = Bay::open(name)?;
+    for line in &bay.told {
+        eprintln!("{line}");
+    }
     let _lock = Lock::acquire(&bay.layout.lock())?;
     let config = bay.config()?;
     let services = bay.services(&config)?;
@@ -460,7 +485,7 @@ fn rollback(
 }
 
 pub fn down(name: &str) -> Result<()> {
-    let bay = Bay::open(name)?;
+    let bay = Bay::open_to_stop(name)?;
     let project = bay.project();
     if !project.file.exists() {
         bail!("bay `{name}` was never started");
@@ -469,7 +494,7 @@ pub fn down(name: &str) -> Result<()> {
 }
 
 pub fn rm(name: &str, force: bool) -> Result<()> {
-    let bay = Bay::open(name)?;
+    let bay = Bay::open_to_stop(name)?;
     let resources = resources::from_config(&bay.descriptor.resources);
     remove(&bay, &resources, force, &confirm)
 }
@@ -642,7 +667,8 @@ pub fn head(tree: &Path) -> String {
 }
 
 pub fn statuses(layout: &Layout) -> Result<Vec<BayStatus>> {
-    let descriptor: Option<Descriptor> = read_toml(&layout.descriptor()).ok();
+    // What is stated alone: inferring the rest at each read would be too slow for `watch`.
+    let descriptor: Option<Stated> = stated(layout).ok();
     let declared = descriptor
         .as_ref()
         .map_or_default(|descriptor| resources::from_config(&descriptor.resources));
@@ -684,7 +710,7 @@ pub fn statuses(layout: &Layout) -> Result<Vec<BayStatus>> {
                     .map(|group| {
                         let services = descriptor
                             .as_ref()
-                            .and_then(|descriptor| descriptor.groups.get(group))
+                            .and_then(|descriptor| descriptor.groups.as_ref()?.get(group))
                             .cloned()
                             .unwrap_or_default();
                         (group.clone(), services)
@@ -763,6 +789,7 @@ mod tests {
                 "#,
             )
             .unwrap(),
+            told: Vec::new(),
         }
     }
 

@@ -20,15 +20,15 @@ What each version brought is in [CHANGELOG.md](CHANGELOG.md).
 
 bayplan aims to infer what it can from the Compose configuration, so that it works without blocking in most
 cases, while a precise description of the project remains the reliable way to handle the unusual ones.
-These principles guide its design; the first and the last apply fully today, the others in part, through
-`bp init`, and fully where it is heading.
+These principles guide its design.
 
 1. **Explicit wins.** What the descriptor states always takes precedence over what bayplan infers.
-2. **Infer rather than block.** `bp init` infers the descriptor from the resolved Compose configuration and
-   git (labels, images, mounts, untracked files, lockfiles). *Planned*: `bp up` would infer what the
-   descriptor leaves out; today it requires one.
-3. **Every inference is visible.** Each line `bp init` writes says where it comes from. *Planned*: the same
-   for what `bp up` would infer.
+2. **Infer rather than block.** Without a descriptor, or for what it leaves out, bayplan infers from the
+   resolved Compose configuration and git (labels, images, mounts, untracked files, lockfiles) what it
+   needs to get a bay running. The shared resources are the exception: isolating them changes the main
+   stack's services, so they are only ever stated.
+3. **Every inference is visible.** `bp up` tells what it inferred, and each line `bp init` writes says where
+   it comes from.
 4. **Nudge towards explicit.** `bp init` writes the inferences as descriptor lines, to review and keep.
 5. **Warn on ambiguity, never gamble.** What bayplan cannot carry over to a bay raises a warning, and
    nothing is removed on a guess: data it did not create is left alone.
@@ -181,8 +181,10 @@ clone = true                      # own copy of the database (default: shared wi
 
 ### Descriptor — `bayplan.toml`
 
-Written once per repository, best started with `bp init --write`, then reviewed. Every key but `router` and
-`groups` is optional.
+Optional: every key it leaves out is inferred when a bay starts, and `bp up` tells what it inferred; a key
+stated, even an empty list (`link = []`), is taken as is. `resources` and `registrations` are never inferred:
+without them, the bays share the main stack's databases, queues and caches, which `bp up` warns about.
+Writing one is best started with `bp init --write`, then reviewed.
 
 `bp init` reads the main stack's Compose configuration and git, and infers:
 

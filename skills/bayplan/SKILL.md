@@ -13,8 +13,9 @@ services; everything it does not duplicate is reached on the main stack.
 
 - `bayplan.toml` at the repository root: the descriptor. It lists the **groups** of services a bay can
   pick from, and how to duplicate the stack. Read it, do not change it without the user's agreement.
-  Without one, `bp init` prints what bayplan infers: show it to the user, who decides whether to write it
-  (`bp init --write`) and what to fix.
+  It is optional: what it leaves out is inferred, and `bp up` prints each inferred line and each warning
+  about shared resources; pass them on to the user. `bp init` prints the whole inferred descriptor, with
+  its group names: the user decides whether to write it (`bp init --write`) and what to fix.
 - `.bayplan/bays/<bay>.toml`: what a bay runs. Writing one is how a bay is created.
 - `.bayplan/worktrees/<bay>/`: the bay's worktree. Code for a bay is edited **there**, never in the main
   tree.
