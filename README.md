@@ -92,14 +92,16 @@ bp up <bay> [--from <ref>] [--branch <name>] [--build]   # create what is missin
 bp down <bay>                          # stop, keeping the worktree and resources
 bp rm <bay> [--force]                  # remove containers, resources, registrations and worktree
 bp init [--write]                      # infer bayplan.toml, print it, or write it if missing
-bp ls                                  # list the bays, their state, branch and HEAD, and hosts
+bp ls [--json]                         # list the bays, their state, branch and HEAD, and hosts
 bp watch                               # follow the bays: containers, URLs to open, logs
 bp update                              # install the latest release
 bp uninstall                           # remove bp, leaving the bays as they are
 ```
 
-Run it from anywhere in the repository. `rm` asks before removing a worktree with uncommitted changes or
-unreferenced commits, unless `--force`; it keeps the bay config and the worktree's branch.
+Run it from anywhere in the repository. `ls --json` prints each bay in full, for scripts and agents: its
+state, branch, uncommitted changes, URLs, containers, resources and groups. `rm` asks before removing a
+worktree with uncommitted changes or unreferenced commits, unless `--force`; it keeps the bay config and the
+worktree's branch.
 
 `watch` shows the main stack, then the bays, with their branch (`●` for uncommitted changes, `↑`/`↓` for
 commits ahead of and behind the upstream) and, for the selected one, its containers, its URLs, what it has

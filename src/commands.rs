@@ -1,9 +1,9 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::compose::runner::{self, Project};
 use crate::compose::transform::{self, Env, Input, env_of, suffixed};
@@ -737,8 +737,46 @@ pub fn statuses(layout: &Layout) -> Result<Vec<BayStatus>> {
         .collect()
 }
 
-pub fn ls() -> Result<()> {
+/// A bay as `bp ls --json` prints it.
+fn to_json(status: &BayStatus) -> Value {
+    let containers: Vec<Value> = status
+        .containers
+        .iter()
+        .map(|container| {
+            json!({
+                "service": container.service,
+                "state": container.state,
+                "health": container.health,
+                "exit_code": container.exit_code,
+            })
+        })
+        .collect();
+    json!({
+        "name": status.name,
+        "status": status.summary(),
+        "project": status.project,
+        "worktree": status.worktree,
+        "head": status.head,
+        "dirty": status.dirty,
+        "ahead": status.sync.map(|(ahead, _)| ahead),
+        "behind": status.sync.map(|(_, behind)| behind),
+        "urls": status.urls,
+        "containers": containers,
+        "resources": status.resources.iter().cloned().collect::<BTreeMap<_, _>>(),
+        "groups": status.groups.iter().cloned().collect::<BTreeMap<_, _>>(),
+        "from": status.from,
+        "branch": status.branch,
+        "config_error": status.config_error,
+    })
+}
+
+pub fn ls(as_json: bool) -> Result<()> {
     let statuses = statuses(&Layout::discover()?)?;
+    if as_json {
+        let bays: Vec<Value> = statuses.iter().map(to_json).collect();
+        println!("{}", serde_json::to_string_pretty(&bays)?);
+        return Ok(());
+    }
     if statuses.is_empty() {
         println!("No bay: create .bayplan/bays/<bay>.toml, then run `bp up <bay>`");
         return Ok(());
@@ -1194,5 +1232,51 @@ mod tests {
         assert_eq!(status.containers[0].health, "healthy");
         assert!(docker.calls()[0].ends_with(&format!("-p {} ps -a --format json", status.project)));
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn prints_a_bay_as_json_with_its_resources_and_groups_by_name() {
+        let status = BayStatus {
+            name: "demo".to_owned(),
+            project: "shop-bay-demo".to_owned(),
+            compose_file: PathBuf::from("compose.json"),
+            worktree: PathBuf::from("/repo/.bayplan/worktrees/demo"),
+            head: Some("feat/x@abc1234".to_owned()),
+            dirty: true,
+            sync: Some((2, 0)),
+            urls: vec!["https://web-demo.app.localhost".to_owned()],
+            containers: vec![Container {
+                name: "shop-bay-demo-web-demo-1".to_owned(),
+                service: "web-demo".to_owned(),
+                state: "running".to_owned(),
+                health: "healthy".to_owned(),
+                exit_code: 0,
+            }],
+            resources: vec![("redis".to_owned(), "own database 4".to_owned())],
+            groups: vec![("web".to_owned(), vec!["web".to_owned()])],
+            from: None,
+            branch: Some("feat/x".to_owned()),
+            config_error: None,
+        };
+        assert_eq!(
+            to_json(&status),
+            json!({
+                "name": "demo",
+                "status": "up 1/1",
+                "project": "shop-bay-demo",
+                "worktree": "/repo/.bayplan/worktrees/demo",
+                "head": "feat/x@abc1234",
+                "dirty": true,
+                "ahead": 2,
+                "behind": 0,
+                "urls": ["https://web-demo.app.localhost"],
+                "containers": [{"service": "web-demo", "state": "running", "health": "healthy", "exit_code": 0}],
+                "resources": {"redis": "own database 4"},
+                "groups": {"web": ["web"]},
+                "from": null,
+                "branch": "feat/x",
+                "config_error": null,
+            })
+        );
     }
 }

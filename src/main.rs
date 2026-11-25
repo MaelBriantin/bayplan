@@ -29,7 +29,7 @@ fn main() {
         } => commands::up(&bay, from.as_deref(), branch.as_deref(), build),
         Command::Down { bay } => commands::down(&bay),
         Command::Rm { bay, force } => commands::rm(&bay, force),
-        Command::Ls => commands::ls(),
+        Command::Ls { json } => commands::ls(json),
         Command::Watch => watch::run(),
         Command::Init { write } => infer::init(write),
         Command::Update => install::update(),

@@ -33,7 +33,11 @@ pub enum Command {
         force: bool,
     },
     /// Lists the bays and their state
-    Ls,
+    Ls {
+        /// Prints each bay in full as JSON, for scripts and agents
+        #[arg(long)]
+        json: bool,
+    },
     /// Infers the descriptor, bayplan.toml, from the Compose configuration and git, each line saying why
     Init {
         /// Writes bayplan.toml, unless it exists

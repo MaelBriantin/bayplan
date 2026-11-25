@@ -49,14 +49,14 @@ Pass `--build` after a Dockerfile change.
 | Command | Effect |
 |---|---|
 | `bp up <bay> [--from <ref>] [--branch <name>] [--build]` | creates what is missing, then starts the bay |
-| `bp ls` | lists bays with their state (`up n/m`, `down`), branch and HEAD, and URLs |
+| `bp ls --json` | lists bays with their state (`up n/m`, `down`), branch and HEAD, uncommitted changes, URLs, containers, resources and groups |
 | `bp down <bay>` | stops the bay, keeping its worktree and resources |
 | `bp rm <bay> [--force]` | removes containers, resources and **the worktree**, keeping its branch |
 
 Never run `bp rm`, and never pass `--force`, unless the user explicitly asks: it deletes the worktree,
 with any uncommitted work in it.
 
-`bp watch` is an interactive screen for the user: do not run it, use `bp ls` to read the bays' state.
+`bp watch` is an interactive screen for the user: do not run it, use `bp ls --json` to read the bays' state.
 
 ## Hosts
 
