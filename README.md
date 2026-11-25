@@ -105,7 +105,8 @@ unreferenced commits, unless `--force`; it keeps the bay config and the worktree
 commits ahead of and behind the upstream) and, for the selected one, its containers, its URLs, what it has
 of each resource (its own share, or the main stack's), and the logs of the selected container, read again
 every 2 seconds; it says so when Docker is not reachable. Started inside a bay's worktree, it selects that
-bay. `?` lists the keys:
+bay. Its bottom line shows first the keys acting on the selection (`u`, `d`, `x` on a bay, `r` on a
+container); `?` lists them all:
 
 - `↑↓` (or `j`/`k`) selects, `←`/`→` (or `h`/`l`, `Tab`) moves between the bays and their containers;
 - `1`–`9` opens a URL in the browser, `p` the pull request of the selected branch (with the GitHub CLI,
